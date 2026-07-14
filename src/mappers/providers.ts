@@ -7,7 +7,7 @@ import type {
 type DbCity = {
   id: string;
   name: string;
-} | null;
+};
 
 type DbProviderRow = {
   id: string;
@@ -22,8 +22,13 @@ type DbProviderRow = {
   lat: number | null;
   lng: number | null;
   maps_url: string | null;
-  city: DbCity;
+  city: DbCity | DbCity[] | null;
 };
+
+function normalizeCity(city: DbCity | DbCity[] | null): DbCity | null {
+  if (!city) return null;
+  return Array.isArray(city) ? (city[0] ?? null) : city;
+}
 
 type DbProviderPhotoRow = {
   id: string;
@@ -61,7 +66,7 @@ export function toProviderDto(row: DbProviderRow): ProviderDto {
     lat: row.lat,
     lng: row.lng,
     mapsUrl: row.maps_url,
-    city: row.city,
+    city: normalizeCity(row.city),
   };
 }
 

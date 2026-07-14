@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../config/env.js";
-import { getSupabaseForRequest } from "../middleware/auth.js";
+import { getSupabaseForRequest, type AuthVariables } from "../middleware/auth.js";
 import { getProviderById, listProviders } from "../repositories/providers.js";
 import { listProvidersQuerySchema } from "../schemas/providers.js";
 
 export function createProviderRoutes(env: Env) {
-  const routes = new Hono();
+  const routes = new Hono<{ Variables: AuthVariables }>();
 
   routes.get("/", async (c) => {
     const rawQuery = {
