@@ -55,6 +55,9 @@ describe("toProviderDto", () => {
       lng: 26.1025,
       maps_url: "https://maps.google.com",
       city: { id: "660e8400-e29b-41d4-a716-446655440001", name: "București" },
+      provider_photos: [
+        { id: "770e8400-e29b-41d4-a716-446655440002", public_url: "https://cdn.example/photo.jpg", width_px: 800, height_px: 600 },
+      ],
     });
 
     expect(dto).toEqual({
@@ -71,6 +74,7 @@ describe("toProviderDto", () => {
       lng: 26.1025,
       mapsUrl: "https://maps.google.com",
       city: { id: "660e8400-e29b-41d4-a716-446655440001", name: "București" },
+      photoUrl: "https://cdn.example/photo.jpg",
     });
   });
 
@@ -89,8 +93,10 @@ describe("toProviderDto", () => {
       lng: null,
       maps_url: null,
       city: null,
+      provider_photos: [],
     });
 
     expect(dto.categories).toEqual(["venue"]);
+    expect(dto.photoUrl).toBeNull();
   });
 });

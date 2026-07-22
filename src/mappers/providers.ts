@@ -9,6 +9,13 @@ type DbCity = {
   name: string;
 };
 
+type DbProviderPhotoRow = {
+  id: string;
+  public_url: string | null;
+  width_px: number | null;
+  height_px: number | null;
+};
+
 type DbProviderRow = {
   id: string;
   place_id: string;
@@ -23,19 +30,13 @@ type DbProviderRow = {
   lng: number | null;
   maps_url: string | null;
   city: DbCity | DbCity[] | null;
+  provider_photos?: DbProviderPhotoRow[] | null;
 };
 
 function normalizeCity(city: DbCity | DbCity[] | null): DbCity | null {
   if (!city) return null;
   return Array.isArray(city) ? (city[0] ?? null) : city;
 }
-
-type DbProviderPhotoRow = {
-  id: string;
-  public_url: string | null;
-  width_px: number | null;
-  height_px: number | null;
-};
 
 type DbProviderDetailRow = DbProviderRow & {
   provider_photos: DbProviderPhotoRow[] | null;
@@ -50,6 +51,11 @@ const VALID_CATEGORIES = new Set<string>([
 
 function toCategories(raw: string[]): ProviderCategory[] {
   return raw.filter((c): c is ProviderCategory => VALID_CATEGORIES.has(c));
+}
+
+function firstPhotoUrl(photos: DbProviderPhotoRow[] | null | undefined): string | null {
+  const url = photos?.find((photo) => Boolean(photo.public_url))?.public_url;
+  return url ?? null;
 }
 
 export function toProviderDto(row: DbProviderRow): ProviderDto {
@@ -67,6 +73,7 @@ export function toProviderDto(row: DbProviderRow): ProviderDto {
     lng: row.lng,
     mapsUrl: row.maps_url,
     city: normalizeCity(row.city),
+    photoUrl: firstPhotoUrl(row.provider_photos),
   };
 }
 

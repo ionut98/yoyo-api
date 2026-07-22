@@ -47,6 +47,7 @@ export const providerSchema = z.object({
   lng: z.number().nullable(),
   mapsUrl: z.string().nullable(),
   city: citySchema.nullable(),
+  photoUrl: z.string().nullable(),
 });
 
 export type ProviderDto = z.infer<typeof providerSchema>;

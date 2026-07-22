@@ -9,7 +9,8 @@ import type {
 const PROVIDER_SELECT = `
   id, place_id, name, address, phone, website,
   rating, review_count, lat, lng, categories, maps_url,
-  city:cities(id, name)
+  city:cities(id, name),
+  provider_photos(id, public_url, width_px, height_px)
 `;
 
 async function resolveCityId(
@@ -88,12 +89,7 @@ export async function getProviderById(
 ): Promise<ProviderDetailDto | null> {
   const { data, error } = await supabase
     .from("providers")
-    .select(
-      `
-      ${PROVIDER_SELECT},
-      provider_photos(id, public_url, width_px, height_px)
-    `,
-    )
+    .select(PROVIDER_SELECT)
     .eq("id", id)
     .maybeSingle();
 
