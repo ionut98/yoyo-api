@@ -6,7 +6,7 @@ describe("listProvidersQuerySchema", () => {
   it("applies defaults", () => {
     const result = listProvidersQuerySchema.parse({});
     expect(result).toEqual({
-      sort: "rating",
+      sort: "recommended",
       order: "desc",
       page: 1,
       limit: 20,
@@ -26,11 +26,16 @@ describe("listProvidersQuerySchema", () => {
       city: "București",
       category: "venue",
       minRating: 4,
-      sort: "rating",
+      sort: "recommended",
       order: "desc",
       page: 2,
       limit: 10,
     });
+  });
+
+  it("accepts recommended sort", () => {
+    const result = listProvidersQuerySchema.parse({ sort: "recommended" });
+    expect(result.sort).toBe("recommended");
   });
 
   it("rejects invalid category", () => {

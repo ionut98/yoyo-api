@@ -64,8 +64,11 @@ export async function listProviders(
     dbQuery = dbQuery.gte("rating", minRating);
   }
 
+  const sortColumn = sort === "recommended" ? "recommendation_score" : sort;
+  const sortAscending = sort === "recommended" ? false : order === "asc";
+
   dbQuery = dbQuery
-    .order(sort, { ascending: order === "asc", nullsFirst: false })
+    .order(sortColumn, { ascending: sortAscending, nullsFirst: false })
     .range(offset, offset + limit - 1);
 
   const { data, error, count } = await dbQuery;

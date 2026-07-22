@@ -13,7 +13,7 @@ export const listProvidersQuerySchema = z.object({
   city: z.string().min(1).optional(),
   category: providerCategorySchema.optional(),
   minRating: z.coerce.number().min(0).max(5).optional(),
-  sort: z.enum(["rating", "name", "review_count"]).default("rating"),
+  sort: z.enum(["recommended", "rating", "name", "review_count"]).default("recommended"),
   order: z.enum(["asc", "desc"]).default("desc"),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(20),
