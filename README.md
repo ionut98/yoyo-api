@@ -1,6 +1,9 @@
 # yoyo-api
 
-Hono API server for **YOYO** — serves provider data from Supabase with RLS-backed public reads.
+Hono API server for **YOYO** — serves provider data from Supabase.
+
+Provider endpoints require a Supabase Auth access token
+(`Authorization: Bearer <token>`). Health remains public.
 
 ## Setup
 
@@ -23,9 +26,9 @@ Server starts on `http://localhost:3001` by default.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check |
-| GET | `/api/providers` | List providers (filters + pagination) |
-| GET | `/api/providers/:id` | Provider detail with photos |
+| GET | `/health` | Health check (public) |
+| GET | `/api/providers` | List providers (auth required) |
+| GET | `/api/providers/:id` | Provider detail with photos (auth required) |
 
 ### Query parameters (`GET /api/providers`)
 
@@ -43,8 +46,10 @@ Server starts on `http://localhost:3001` by default.
 
 ```bash
 curl http://localhost:3001/health
-curl "http://localhost:3001/api/providers?city=București&category=venue"
-curl http://localhost:3001/api/providers/<uuid>
+curl -H "Authorization: Bearer <access_token>" \
+  "http://localhost:3001/api/providers?city=București&category=venue"
+curl -H "Authorization: Bearer <access_token>" \
+  http://localhost:3001/api/providers/<uuid>
 ```
 
 ## Environment variables

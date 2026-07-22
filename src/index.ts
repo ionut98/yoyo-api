@@ -4,7 +4,6 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { loadEnv } from "./config/env.js";
-import { createOptionalAuth } from "./middleware/auth.js";
 import { healthRoutes } from "./routes/health.js";
 import { createProviderRoutes } from "./routes/providers.js";
 
@@ -20,8 +19,6 @@ app.use(
     allowHeaders: ["Content-Type", "Authorization"],
   }),
 );
-
-app.use("*", createOptionalAuth(env));
 
 app.route("/", healthRoutes);
 app.route("/api/providers", createProviderRoutes(env));
