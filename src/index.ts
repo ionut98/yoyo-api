@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { loadEnv } from "./config/env.js";
 import { healthRoutes } from "./routes/health.js";
+import { createPartyRoutes } from "./routes/parties.js";
 import { createProviderRoutes } from "./routes/providers.js";
 
 const env = loadEnv();
@@ -22,6 +23,7 @@ app.use(
 
 app.route("/", healthRoutes);
 app.route("/api/providers", createProviderRoutes(env));
+app.route("/api/parties", createPartyRoutes(env));
 
 serve(
   {
