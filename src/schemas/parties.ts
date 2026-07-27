@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const ageRangeSchema = z.enum(["3-5", "6-8", "9-12"]);
+export const ageRangeSchema = z.enum(["3-5", "6-8", "9-10"]);
 export const budgetSchema = z.enum(["1500", "2500", "3500", "5000+"]);
 export const guestCountSchema = z.enum(["10", "15", "20", "20+"]);
 export const datePreferenceSchema = z.enum([
