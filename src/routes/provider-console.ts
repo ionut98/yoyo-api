@@ -6,7 +6,10 @@ import {
   getSupabaseForRequest,
   type AuthVariables,
 } from "../middleware/auth.js";
-import { getProviderMemberships } from "../repositories/accounts.js";
+import {
+  claimProviderMembership,
+  getProviderMemberships,
+} from "../repositories/accounts.js";
 import { listProviderPackages } from "../repositories/package-requests.js";
 import {
   getProviderProfileForMember,
@@ -53,6 +56,36 @@ export function createProviderConsoleRoutes(env: Env) {
     } catch (error) {
       console.error(error);
       return c.json({ error: "Failed to load provider memberships" }, 500);
+    }
+  });
+
+  routes.post("/claim", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = z
+      .object({
+        providerId: z.string().uuid(),
+      })
+      .safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid claim payload" }, 400);
+    }
+
+    try {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+      const supabase = getSupabaseForRequest(c, env);
+      const membership = await claimProviderMembership(
+        supabase,
+        user.id,
+        parsed.data.providerId,
+      );
+      return c.json({ data: membership });
+    } catch (error) {
+      console.error(error);
+      return c.json(
+        { error: error instanceof Error ? error.message : "Failed to claim provider" },
+        500,
+      );
     }
   });
 

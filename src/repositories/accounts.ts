@@ -1,25 +1,56 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Env } from "../config/env.js";
-import { createSupabaseClient } from "../clients/supabase.js";
 
 export async function ensureAccountRole(
-  env: Env,
+  supabase: SupabaseClient,
   userId: string,
   role: "parent" | "provider",
 ): Promise<void> {
-  const supabase = createSupabaseClient(env);
-  const { error } = await supabase.from("account_roles").upsert(
-    {
-      user_id: userId,
-      role,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" },
-  );
+  const existing = await getAccountRole(supabase, userId);
+  // Keep an existing role (e.g. parent) so the same auth account can also claim a provider.
+  if (existing) {
+    return;
+  }
+
+  const { error } = await supabase.from("account_roles").insert({
+    user_id: userId,
+    role,
+    updated_at: new Date().toISOString(),
+  });
 
   if (error) {
     throw new Error(`Failed to ensure account role: ${error.message}`);
   }
+}
+
+export async function claimProviderMembership(
+  supabase: SupabaseClient,
+  userId: string,
+  providerId: string,
+): Promise<{ providerId: string; role: string }> {
+  await ensureAccountRole(supabase, userId, "provider");
+
+  const { data, error } = await supabase
+    .from("provider_memberships")
+    .upsert(
+      {
+        user_id: userId,
+        provider_id: providerId,
+        role: "owner",
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,provider_id" },
+    )
+    .select("provider_id, role")
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to claim provider membership: ${error.message}`);
+  }
+
+  return {
+    providerId: data.provider_id as string,
+    role: data.role as string,
+  };
 }
 
 export async function getAccountRole(
