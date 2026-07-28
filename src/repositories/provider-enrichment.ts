@@ -133,6 +133,17 @@ export async function listEffectiveAvailability(
   supabase: SupabaseClient,
   options: { providerIds: string[]; date: string },
 ): Promise<EffectiveAvailabilityRow[]> {
+  return listEffectiveAvailabilityRange(supabase, {
+    providerIds: options.providerIds,
+    startDate: options.date,
+    endDate: options.date,
+  });
+}
+
+export async function listEffectiveAvailabilityRange(
+  supabase: SupabaseClient,
+  options: { providerIds: string[]; startDate: string; endDate: string },
+): Promise<EffectiveAvailabilityRow[]> {
   if (options.providerIds.length === 0) {
     return [];
   }
@@ -141,7 +152,9 @@ export async function listEffectiveAvailability(
     .from("provider_availability")
     .select("provider_id, date, slot, status")
     .in("provider_id", options.providerIds)
-    .eq("date", options.date);
+    .gte("date", options.startDate)
+    .lte("date", options.endDate)
+    .limit(5000);
 
   if (baseError) {
     throw new Error(`Failed to load provider availability: ${baseError.message}`);
@@ -151,9 +164,11 @@ export async function listEffectiveAvailability(
     .from("slot_holds")
     .select("provider_id, date, slot")
     .in("provider_id", options.providerIds)
-    .eq("date", options.date)
+    .gte("date", options.startDate)
+    .lte("date", options.endDate)
     .eq("status", "active")
-    .gt("expires_at", new Date().toISOString());
+    .gt("expires_at", new Date().toISOString())
+    .limit(5000);
 
   if (holdsError) {
     throw new Error(`Failed to load slot holds: ${holdsError.message}`);
@@ -163,8 +178,10 @@ export async function listEffectiveAvailability(
     .from("party_package_items")
     .select("provider_id, date, slot")
     .in("provider_id", options.providerIds)
-    .eq("date", options.date)
-    .eq("item_status", "confirmed");
+    .gte("date", options.startDate)
+    .lte("date", options.endDate)
+    .eq("item_status", "confirmed")
+    .limit(5000);
 
   if (itemsError) {
     throw new Error(`Failed to load confirmed package items: ${itemsError.message}`);

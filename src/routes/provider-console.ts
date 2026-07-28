@@ -13,7 +13,7 @@ import {
 import { listProviderPackages } from "../repositories/package-requests.js";
 import {
   getProviderProfileForMember,
-  listEffectiveAvailability,
+  listEffectiveAvailabilityRange,
   updateProviderAvailability,
   updateProviderProfile,
 } from "../repositories/provider-enrichment.js";
@@ -137,27 +137,34 @@ export function createProviderConsoleRoutes(env: Env) {
     try {
       const supabase = await requireProviderMembership(env, c as any, providerId);
       const [year, monthNumber] = month.split("-").map(Number);
+      if (!year || !monthNumber) {
+        return c.json({ error: "Invalid month" }, 400);
+      }
+
+      const startDate = `${month}-01`;
+      const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+      const endDate = `${month}-${String(lastDay).padStart(2, "0")}`;
       const dates: string[] = [];
-      const lastDay = new Date(Date.UTC(year!, monthNumber!, 0)).getUTCDate();
       for (let day = 1; day <= lastDay; day++) {
         dates.push(`${month}-${String(day).padStart(2, "0")}`);
       }
-      const rows = await Promise.all(
-        dates.map((date) =>
-          listEffectiveAvailability(supabase, {
-            providerIds: [providerId],
-            date,
-          }),
-        ),
-      );
-      const days = dates.map((date, index) => {
-        const dayRows = rows[index] ?? [];
-        return {
-          date,
-          morning: dayRows.find((row) => row.slot === "morning")?.status ?? "booked",
-          afternoon: dayRows.find((row) => row.slot === "afternoon")?.status ?? "booked",
-        };
+
+      const rows = await listEffectiveAvailabilityRange(supabase, {
+        providerIds: [providerId],
+        startDate,
+        endDate,
       });
+
+      const byKey = new Map(
+        rows.map((row) => [`${row.date}:${row.slot}`, row.status] as const),
+      );
+
+      const days = dates.map((date) => ({
+        date,
+        morning: byKey.get(`${date}:morning`) ?? "booked",
+        afternoon: byKey.get(`${date}:afternoon`) ?? "booked",
+      }));
+
       return c.json({ providerId, days });
     } catch (error) {
       console.error(error);
