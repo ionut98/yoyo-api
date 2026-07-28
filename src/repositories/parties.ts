@@ -63,3 +63,22 @@ export async function createPartyForUser(
 
   return toPartyDto(data);
 }
+
+export async function getPartyById(
+  supabase: SupabaseClient,
+  userId: string,
+  partyId: string,
+): Promise<PartyDto | null> {
+  const { data, error } = await supabase
+    .from("parties")
+    .select(PARTY_SELECT)
+    .eq("user_id", userId)
+    .eq("id", partyId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to get party: ${error.message}`);
+  }
+
+  return data ? toPartyDto(data) : null;
+}

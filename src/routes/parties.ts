@@ -6,6 +6,7 @@ import {
   getSupabaseForRequest,
   type AuthVariables,
 } from "../middleware/auth.js";
+import { ensureAccountRole } from "../repositories/accounts.js";
 import { createPartyForUser, listPartiesForUser } from "../repositories/parties.js";
 import { createPartyBodySchema } from "../schemas/parties.js";
 
@@ -48,6 +49,7 @@ export function createPartyRoutes(env: Env) {
       if (!user) {
         return c.json({ error: "Unauthorized" }, 401);
       }
+      await ensureAccountRole(env, user.id, "parent");
       const supabase = getSupabaseForRequest(c, env);
       const party = await createPartyForUser(supabase, user.id, parsed.data);
       return c.json(party, 201);
