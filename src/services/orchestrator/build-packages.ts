@@ -52,6 +52,14 @@ function createItem(
     priceEstimate,
     bookingMode: profile.bookingMode,
     itemStatus: "proposed",
+    categories: profile.categories,
+    address: null,
+    city: profile.city,
+    photoUrl: null,
+    rating: profile.rating,
+    reviewCount: profile.reviewCount,
+    website: null,
+    mapsUrl: null,
   };
 }
 

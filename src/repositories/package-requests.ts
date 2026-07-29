@@ -7,7 +7,11 @@ const PACKAGE_SELECT = `
   requested_at, expires_at, created_at, updated_at,
   party_package_items(
     id, provider_id, role, date, slot, price_estimate, booking_mode, item_status,
-    provider:providers(name)
+    provider:providers(
+      name, categories, address, website, rating, review_count, maps_url,
+      city:cities(name),
+      provider_photos(id, public_url, width_px, height_px)
+    )
   )
 `;
 
@@ -34,6 +38,42 @@ export type PackageInsert = {
   }>;
 };
 
+const VALID_CATEGORIES = new Set(["venue", "entertainment", "balloons", "cakes"]);
+
+function firstPhotoUrl(
+  photos: Array<{ public_url?: string | null }> | null | undefined,
+): string | null {
+  const url = photos?.find((photo) => Boolean(photo.public_url))?.public_url;
+  return url ?? null;
+}
+
+function mapProviderCard(provider: any) {
+  const row = Array.isArray(provider) ? provider[0] : provider;
+  const cityRelation = row?.city as { name?: string } | Array<{ name?: string }> | null | undefined;
+  const city = Array.isArray(cityRelation)
+    ? (cityRelation[0]?.name ?? null)
+    : (cityRelation?.name ?? null);
+  const categories = ((row?.categories as string[] | null) ?? []).filter((value) =>
+    VALID_CATEGORIES.has(value),
+  ) as Array<"venue" | "entertainment" | "balloons" | "cakes">;
+
+  return {
+    providerName: (row?.name as string | undefined) ?? "Provider",
+    categories,
+    address: (row?.address as string | null | undefined) ?? null,
+    city,
+    photoUrl: firstPhotoUrl(row?.provider_photos),
+    rating:
+      row?.rating === null || row?.rating === undefined ? null : Number(row.rating),
+    reviewCount:
+      row?.review_count === null || row?.review_count === undefined
+        ? null
+        : Number(row.review_count),
+    website: (row?.website as string | null | undefined) ?? null,
+    mapsUrl: (row?.maps_url as string | null | undefined) ?? null,
+  };
+}
+
 function mapPackageRow(row: any): PackageRecommendationDto {
   return {
     id: row.id,
@@ -49,17 +89,28 @@ function mapPackageRow(row: any): PackageRecommendationDto {
     score: Number(row.score ?? 0),
     scoreBreakdown: (row.score_breakdown as Record<string, number> | null) ?? {},
     reasons: (row.reasons as string[] | null) ?? [],
-    items: (row.party_package_items ?? []).map((item: any) => ({
-      id: item.id,
-      providerId: item.provider_id,
-      providerName: Array.isArray(item.provider) ? item.provider[0]?.name ?? "Provider" : item.provider?.name ?? "Provider",
-      role: item.role,
-      date: item.date,
-      slot: item.slot,
-      priceEstimate: Number(item.price_estimate),
-      bookingMode: item.booking_mode,
-      itemStatus: item.item_status,
-    })),
+    items: (row.party_package_items ?? []).map((item: any) => {
+      const providerCard = mapProviderCard(item.provider);
+      return {
+        id: item.id,
+        providerId: item.provider_id,
+        providerName: providerCard.providerName,
+        role: item.role,
+        date: item.date,
+        slot: item.slot,
+        priceEstimate: Number(item.price_estimate),
+        bookingMode: item.booking_mode,
+        itemStatus: item.item_status,
+        categories: providerCard.categories,
+        address: providerCard.address,
+        city: providerCard.city,
+        photoUrl: providerCard.photoUrl,
+        rating: providerCard.rating,
+        reviewCount: providerCard.reviewCount,
+        website: providerCard.website,
+        mapsUrl: providerCard.mapsUrl,
+      };
+    }),
   };
 }
 

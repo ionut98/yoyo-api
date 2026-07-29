@@ -43,6 +43,14 @@ export const packageItemSchema = z.object({
   priceEstimate: z.number().int().nonnegative(),
   bookingMode: bookingModeSchema,
   itemStatus: z.enum(["proposed", "held", "confirmed", "declined", "expired", "cancelled"]),
+  categories: z.array(z.enum(["venue", "entertainment", "balloons", "cakes"])).default([]),
+  address: z.string().nullable().default(null),
+  city: z.string().nullable().default(null),
+  photoUrl: z.string().nullable().default(null),
+  rating: z.number().nullable().default(null),
+  reviewCount: z.number().nullable().default(null),
+  website: z.string().nullable().default(null),
+  mapsUrl: z.string().nullable().default(null),
 });
 
 export const packageRecommendationSchema = z.object({
