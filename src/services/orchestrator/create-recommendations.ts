@@ -32,6 +32,7 @@ export async function createRecommendationsForParty(
   });
 
   const budgetCap = budgetCapFromParty(party);
+  const profilesById = new Map(profiles.map((profile) => [profile.providerId, profile]));
   const candidates = buildPackageCandidates({
     party,
     providers: profiles,
@@ -41,7 +42,7 @@ export async function createRecommendationsForParty(
   })
     .filter((pkg) => pkg.estimatedPrice.min <= budgetCap)
     .map((pkg) => {
-      const { score, breakdown, reasons } = calculateScore(party, pkg);
+      const { score, breakdown, reasons } = calculateScore(party, pkg, profilesById);
       return {
         ...pkg,
         score,

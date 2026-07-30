@@ -6,6 +6,7 @@ export type ProviderProfileRow = {
   providerName: string;
   categories: ProviderCategory[];
   city: string | null;
+  homeSector: string | null;
   rating: number | null;
   reviewCount: number | null;
   recommendationScore: number | null;
@@ -70,6 +71,7 @@ export async function listProviderProfilesForCity(
         id,
         name,
         categories,
+        home_sector,
         rating,
         review_count,
         recommendation_score,
@@ -101,6 +103,7 @@ export async function listProviderProfilesForCity(
         city: Array.isArray(cityRelation)
           ? (cityRelation[0]?.name ?? null)
           : (cityRelation?.name ?? null),
+        homeSector: (provider.home_sector as string | null | undefined) ?? null,
         rating:
           provider.rating === null || provider.rating === undefined ? null : Number(provider.rating),
         reviewCount:
@@ -220,7 +223,7 @@ export async function getProviderProfileForMember(
       service_area_sectors,
       price_min,
       price_max,
-      provider:providers!inner(id, name, categories, rating, review_count, recommendation_score)
+      provider:providers!inner(id, name, categories, home_sector, rating, review_count, recommendation_score)
     `,
     )
     .eq("provider_id", providerId)
@@ -242,6 +245,7 @@ export async function getProviderProfileForMember(
     providerName: provider.name as string,
     categories,
     city: null,
+    homeSector: (provider.home_sector as string | null | undefined) ?? null,
     rating: provider.rating === null || provider.rating === undefined ? null : Number(provider.rating),
     reviewCount:
       provider.review_count === null || provider.review_count === undefined

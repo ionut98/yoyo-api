@@ -4,6 +4,7 @@ import type {
   EffectiveAvailabilityRow,
   ProviderProfileRow,
 } from "../../repositories/provider-enrichment.js";
+import { sectorFitScore } from "./sector-fit.js";
 
 type CandidateItem = PackageRecommendationDto["items"][number];
 
@@ -27,6 +28,10 @@ function availableOnSlot(
       row.slot === slot &&
       (row.status === "available" || row.status === "limited"),
   );
+}
+
+function profileSectorFit(partySector: string | null | undefined, profile: ProviderProfileRow): number {
+  return sectorFitScore(partySector, profile.serviceAreaSectors, profile.homeSector);
 }
 
 function createItem(
@@ -93,8 +98,15 @@ export function buildPackageCandidates(options: {
 }): Array<Omit<PackageRecommendationDto, "score" | "scoreBreakdown" | "reasons">> {
   const { party, providers, availability, date, slot } = options;
   const roles = wantedRoles(party);
-  const venues = providers.filter((provider) => hasService(provider, "space"));
-  const candidates: Array<Omit<PackageRecommendationDto, "score" | "scoreBreakdown" | "reasons">> = [];
+  const venues = providers
+    .filter((provider) => hasService(provider, "space"))
+    .sort((a, b) => {
+      const fitDiff = profileSectorFit(party.sector, b) - profileSectorFit(party.sector, a);
+      if (fitDiff !== 0) return fitDiff;
+      return a.priceMin - b.priceMin;
+    });
+  const candidates: Array<Omit<PackageRecommendationDto, "score" | "scoreBreakdown" | "reasons">> =
+    [];
 
   for (const venue of venues.slice(0, 12)) {
     if (!availableOnSlot(availability, venue.providerId, date, slot)) continue;
@@ -110,12 +122,18 @@ export function buildPackageCandidates(options: {
         continue;
       }
 
-      const alternative = providers.find(
-        (provider) =>
-          provider.providerId !== venue.providerId &&
-          hasService(provider, role) &&
-          availableOnSlot(availability, provider.providerId, date, slot),
-      );
+      const alternative = providers
+        .filter(
+          (provider) =>
+            provider.providerId !== venue.providerId &&
+            hasService(provider, role) &&
+            availableOnSlot(availability, provider.providerId, date, slot),
+        )
+        .sort((a, b) => {
+          const fitDiff = profileSectorFit(party.sector, b) - profileSectorFit(party.sector, a);
+          if (fitDiff !== 0) return fitDiff;
+          return a.priceMin - b.priceMin;
+        })[0];
 
       if (!alternative) {
         valid = false;
