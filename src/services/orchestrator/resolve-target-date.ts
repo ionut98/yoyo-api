@@ -1,4 +1,5 @@
 import type { PartyDto } from "../../schemas/parties.js";
+import { resolveTargetInterval } from "../../lib/time-intervals.js";
 
 function toDateAtNoon(date: Date): Date {
   const copy = new Date(date);
@@ -24,6 +25,14 @@ export function resolveTargetDate(party: PartyDto, now = new Date()): string {
   return nextSaturday(now, 0);
 }
 
-export function resolveTargetSlot(): "morning" | "afternoon" {
+export function resolveTargetSlotForDate(date: string): {
+  startsAt: string;
+  endsAt: string;
+} {
+  return resolveTargetInterval(date);
+}
+
+/** @deprecated use resolveTargetSlotForDate */
+export function resolveTargetSlot(): "afternoon" {
   return "afternoon";
 }

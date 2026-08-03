@@ -11,7 +11,7 @@ import {
 import type { PackageRecommendationDto } from "../../schemas/orchestrator.js";
 import { buildPackageCandidates } from "./build-packages.js";
 import { budgetCapFromParty, calculateScore } from "./score-packages.js";
-import { resolveTargetDate, resolveTargetSlot } from "./resolve-target-date.js";
+import { resolveTargetDate, resolveTargetSlotForDate } from "./resolve-target-date.js";
 
 export async function createRecommendationsForParty(
   supabase: SupabaseClient,
@@ -24,7 +24,7 @@ export async function createRecommendationsForParty(
   }
 
   const date = resolveTargetDate(party);
-  const slot = resolveTargetSlot();
+  const { startsAt, endsAt } = resolveTargetSlotForDate(date);
   const profiles = await listProviderProfilesForCity(supabase, party.city);
   const availability = await listEffectiveAvailability(supabase, {
     providerIds: profiles.map((profile) => profile.providerId),
@@ -38,7 +38,8 @@ export async function createRecommendationsForParty(
     providers: profiles,
     availability,
     date,
-    slot,
+    startsAt,
+    endsAt,
   })
     .filter((pkg) => pkg.estimatedPrice.min <= budgetCap)
     .map((pkg) => {
@@ -63,7 +64,8 @@ export async function createRecommendationsForParty(
       status: pkg.status,
       bookingKind: pkg.bookingKind,
       targetDate: pkg.targetDate,
-      targetSlot: pkg.targetSlot,
+      targetStartsAt: pkg.targetStartsAt,
+      targetEndsAt: pkg.targetEndsAt,
       estimatedPriceMin: pkg.estimatedPrice.min,
       estimatedPriceMax: pkg.estimatedPrice.max,
       score: pkg.score,
@@ -73,7 +75,8 @@ export async function createRecommendationsForParty(
         providerId: item.providerId,
         role: item.role,
         date: item.date,
-        slot: item.slot,
+        startsAt: item.startsAt,
+        endsAt: item.endsAt,
         priceEstimate: item.priceEstimate,
         bookingMode: item.bookingMode,
         itemStatus: "proposed",

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { formatBucharestDate } from "../lib/time-intervals.js";
 
 export async function expireStaleSlotHolds(supabase: SupabaseClient): Promise<void> {
   const now = new Date().toISOString();
@@ -19,8 +20,8 @@ export async function insertSlotHolds(
     packageId: string;
     packageItemId: string;
     providerId: string;
-    date: string;
-    slot: "morning" | "afternoon";
+    startsAt: string;
+    endsAt: string;
     expiresAt: string;
   }>,
 ): Promise<void> {
@@ -31,8 +32,9 @@ export async function insertSlotHolds(
       package_id: row.packageId,
       package_item_id: row.packageItemId,
       provider_id: row.providerId,
-      date: row.date,
-      slot: row.slot,
+      date: formatBucharestDate(new Date(row.startsAt)),
+      starts_at: row.startsAt,
+      ends_at: row.endsAt,
       expires_at: row.expiresAt,
     })),
   );

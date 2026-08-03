@@ -1,9 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProviderCategory } from "../schemas/providers.js";
+import { formatBucharestDate, intervalsOverlap } from "../lib/time-intervals.js";
 
 export type ProviderProfileRow = {
   providerId: string;
   providerName: string;
+  placeId: string;
+  isManual: boolean;
+  address: string | null;
+  phone: string | null;
+  website: string | null;
   categories: ProviderCategory[];
   city: string | null;
   homeSector: string | null;
@@ -23,9 +29,11 @@ export type ProviderProfileRow = {
 };
 
 export type EffectiveAvailabilityRow = {
+  id: string;
   providerId: string;
   date: string;
-  slot: "morning" | "afternoon";
+  startsAt: string;
+  endsAt: string;
   status: "available" | "limited" | "booked";
 };
 
@@ -34,6 +42,54 @@ function normalizeCategory(value: string): ProviderCategory | null {
     return value;
   }
   return null;
+}
+
+function mapProfileRow(row: any, cityFallback: string | null = null): ProviderProfileRow | null {
+  const provider = Array.isArray(row.provider) ? row.provider[0] : row.provider;
+  if (!provider?.id) return null;
+  const categories = ((provider.categories as string[] | null) ?? [])
+    .map(normalizeCategory)
+    .filter((value): value is ProviderCategory => value !== null);
+
+  const cityRelation = provider.city as { name?: string } | Array<{ name?: string }> | null | undefined;
+  const placeId = (provider.place_id as string | null | undefined) ?? "";
+
+  return {
+    providerId: provider.id as string,
+    providerName: provider.name as string,
+    placeId,
+    isManual: placeId.startsWith("manual:"),
+    address: (provider.address as string | null | undefined) ?? null,
+    phone: (provider.phone as string | null | undefined) ?? null,
+    website: (provider.website as string | null | undefined) ?? null,
+    categories,
+    city: Array.isArray(cityRelation)
+      ? (cityRelation[0]?.name ?? cityFallback)
+      : (cityRelation?.name ?? cityFallback),
+    homeSector: (provider.home_sector as string | null | undefined) ?? null,
+    rating: provider.rating === null || provider.rating === undefined ? null : Number(provider.rating),
+    reviewCount:
+      provider.review_count === null || provider.review_count === undefined
+        ? null
+        : Number(provider.review_count),
+    recommendationScore:
+      provider.recommendation_score === null || provider.recommendation_score === undefined
+        ? null
+        : Number(provider.recommendation_score),
+    profileId: row.id as string,
+    bookingMode: (row.booking_mode as "instant" | "request") ?? "request",
+    offeredServices: ((row.offered_services as string[] | null) ?? []).filter(
+      (value): value is "space" | "entertainment" | "balloons" | "cakes" =>
+        value === "space" || value === "entertainment" || value === "balloons" || value === "cakes",
+    ),
+    animatorTypes: (row.animator_types as string[] | null) ?? [],
+    themes: (row.themes as string[] | null) ?? [],
+    activities: (row.activities as string[] | null) ?? [],
+    ageRanges: (row.age_ranges as string[] | null) ?? [],
+    serviceAreaSectors: (row.service_area_sectors as string[] | null) ?? [],
+    priceMin: Number(row.price_min),
+    priceMax: Number(row.price_max),
+  };
 }
 
 export async function listProviderProfilesForCity(
@@ -69,7 +125,11 @@ export async function listProviderProfilesForCity(
       price_max,
       provider:providers!inner(
         id,
+        place_id,
         name,
+        address,
+        phone,
+        website,
         categories,
         home_sector,
         rating,
@@ -87,65 +147,36 @@ export async function listProviderProfilesForCity(
   }
 
   return (data ?? [])
-    .map((row) => {
-      const provider = Array.isArray(row.provider) ? row.provider[0] : row.provider;
-      if (!provider?.id) return null;
-      const categories = ((provider.categories as string[] | null) ?? [])
-        .map(normalizeCategory)
-        .filter((value): value is ProviderCategory => value !== null);
-
-      const cityRelation = provider.city as { name?: string } | Array<{ name?: string }> | null | undefined;
-
-      return {
-        providerId: provider.id as string,
-        providerName: provider.name as string,
-        categories,
-        city: Array.isArray(cityRelation)
-          ? (cityRelation[0]?.name ?? null)
-          : (cityRelation?.name ?? null),
-        homeSector: (provider.home_sector as string | null | undefined) ?? null,
-        rating:
-          provider.rating === null || provider.rating === undefined ? null : Number(provider.rating),
-        reviewCount:
-          provider.review_count === null || provider.review_count === undefined
-            ? null
-            : Number(provider.review_count),
-        recommendationScore:
-          provider.recommendation_score === null || provider.recommendation_score === undefined
-            ? null
-            : Number(provider.recommendation_score),
-        profileId: row.id as string,
-        bookingMode: (row.booking_mode as "instant" | "request") ?? "request",
-        offeredServices: ((row.offered_services as string[] | null) ?? []).filter(
-          (value): value is "space" | "entertainment" | "balloons" | "cakes" =>
-            value === "space" || value === "entertainment" || value === "balloons" || value === "cakes",
-        ),
-        animatorTypes: (row.animator_types as string[] | null) ?? [],
-        themes: (row.themes as string[] | null) ?? [],
-        activities: (row.activities as string[] | null) ?? [],
-        ageRanges: (row.age_ranges as string[] | null) ?? [],
-        serviceAreaSectors: (row.service_area_sectors as string[] | null) ?? [],
-        priceMin: Number(row.price_min),
-        priceMax: Number(row.price_max),
-      };
-    })
-    .filter((row): row is ProviderProfileRow => Boolean(row));
+    .map((row) => mapProfileRow(row, cityRow.name as string))
+    .filter((row): row is ProviderProfileRow => Boolean(row))
+    .reduce<ProviderProfileRow[]>((acc, row) => {
+      const existingIndex = acc.findIndex((item) => item.providerId === row.providerId);
+      if (existingIndex < 0) {
+        acc.push(row);
+        return acc;
+      }
+      // Prefer already-mapped row; first wins after SQL order. Keep higher price-min order as-is.
+      return acc;
+    }, []);
 }
 
 export async function listEffectiveAvailability(
   supabase: SupabaseClient,
   options: { providerIds: string[]; date: string },
 ): Promise<EffectiveAvailabilityRow[]> {
+  const dayStart = `${options.date}T00:00:00.000Z`;
+  const next = new Date(`${options.date}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 2);
   return listEffectiveAvailabilityRange(supabase, {
     providerIds: options.providerIds,
-    startDate: options.date,
-    endDate: options.date,
-  });
+    startIso: dayStart,
+    endIso: next.toISOString(),
+  }).then((rows) => rows.filter((row) => row.date === options.date));
 }
 
 export async function listEffectiveAvailabilityRange(
   supabase: SupabaseClient,
-  options: { providerIds: string[]; startDate: string; endDate: string },
+  options: { providerIds: string[]; startIso: string; endIso: string },
 ): Promise<EffectiveAvailabilityRow[]> {
   if (options.providerIds.length === 0) {
     return [];
@@ -153,10 +184,10 @@ export async function listEffectiveAvailabilityRange(
 
   const { data: baseRows, error: baseError } = await supabase
     .from("provider_availability")
-    .select("provider_id, date, slot, status")
+    .select("id, provider_id, date, starts_at, ends_at, status")
     .in("provider_id", options.providerIds)
-    .gte("date", options.startDate)
-    .lte("date", options.endDate)
+    .lt("starts_at", options.endIso)
+    .gt("ends_at", options.startIso)
     .limit(5000);
 
   if (baseError) {
@@ -165,10 +196,10 @@ export async function listEffectiveAvailabilityRange(
 
   const { data: activeHolds, error: holdsError } = await supabase
     .from("slot_holds")
-    .select("provider_id, date, slot")
+    .select("provider_id, starts_at, ends_at")
     .in("provider_id", options.providerIds)
-    .gte("date", options.startDate)
-    .lte("date", options.endDate)
+    .lt("starts_at", options.endIso)
+    .gt("ends_at", options.startIso)
     .eq("status", "active")
     .gt("expires_at", new Date().toISOString())
     .limit(5000);
@@ -179,10 +210,10 @@ export async function listEffectiveAvailabilityRange(
 
   const { data: confirmedItems, error: itemsError } = await supabase
     .from("party_package_items")
-    .select("provider_id, date, slot")
+    .select("provider_id, starts_at, ends_at")
     .in("provider_id", options.providerIds)
-    .gte("date", options.startDate)
-    .lte("date", options.endDate)
+    .lt("starts_at", options.endIso)
+    .gt("ends_at", options.startIso)
     .eq("item_status", "confirmed")
     .limit(5000);
 
@@ -190,19 +221,32 @@ export async function listEffectiveAvailabilityRange(
     throw new Error(`Failed to load confirmed package items: ${itemsError.message}`);
   }
 
-  const blocked = new Set<string>();
-  for (const row of [...(activeHolds ?? []), ...(confirmedItems ?? [])]) {
-    blocked.add(`${row.provider_id}:${row.date}:${row.slot}`);
-  }
-
-  return (baseRows ?? []).map((row) => ({
+  const blockers = [...(activeHolds ?? []), ...(confirmedItems ?? [])].map((row) => ({
     providerId: row.provider_id as string,
-    date: row.date as string,
-    slot: row.slot as "morning" | "afternoon",
-    status: blocked.has(`${row.provider_id}:${row.date}:${row.slot}`)
-      ? "booked"
-      : ((row.status as "available" | "limited" | "booked") ?? "booked"),
+    startsAt: row.starts_at as string,
+    endsAt: row.ends_at as string,
   }));
+
+  return (baseRows ?? []).map((row) => {
+    const startsAt = row.starts_at as string;
+    const endsAt = row.ends_at as string;
+    const providerId = row.provider_id as string;
+    const blocked = blockers.some(
+      (block) =>
+        block.providerId === providerId &&
+        intervalsOverlap(startsAt, endsAt, block.startsAt, block.endsAt),
+    );
+    return {
+      id: row.id as string,
+      providerId,
+      date: (row.date as string) ?? formatBucharestDate(new Date(startsAt)),
+      startsAt,
+      endsAt,
+      status: blocked
+        ? ("booked" as const)
+        : ((row.status as "available" | "limited" | "booked") ?? "booked"),
+    };
+  });
 }
 
 export async function getProviderProfileForMember(
@@ -214,6 +258,7 @@ export async function getProviderProfileForMember(
     .select(
       `
       id,
+      source_type,
       booking_mode,
       offered_services,
       animator_types,
@@ -223,52 +268,28 @@ export async function getProviderProfileForMember(
       service_area_sectors,
       price_min,
       price_max,
-      provider:providers!inner(id, name, categories, home_sector, rating, review_count, recommendation_score)
+      provider:providers!inner(
+        id, place_id, name, address, phone, website, categories, home_sector,
+        rating, review_count, recommendation_score
+      )
     `,
     )
     .eq("provider_id", providerId)
-    .maybeSingle();
+    .order("source_type", { ascending: true });
 
   if (error) {
     throw new Error(`Failed to load provider profile: ${error.message}`);
   }
-  if (!data?.provider) {
+
+  const rows = data ?? [];
+  const preferred =
+    rows.find((row) => row.source_type === "real") ??
+    rows.find((row) => row.source_type === "manual") ??
+    rows[0];
+  if (!preferred?.provider) {
     return null;
   }
-  const provider = Array.isArray(data.provider) ? data.provider[0] : data.provider;
-  const categories = ((provider.categories as string[] | null) ?? [])
-    .map(normalizeCategory)
-    .filter((value): value is ProviderCategory => value !== null);
-
-  return {
-    providerId: provider.id as string,
-    providerName: provider.name as string,
-    categories,
-    city: null,
-    homeSector: (provider.home_sector as string | null | undefined) ?? null,
-    rating: provider.rating === null || provider.rating === undefined ? null : Number(provider.rating),
-    reviewCount:
-      provider.review_count === null || provider.review_count === undefined
-        ? null
-        : Number(provider.review_count),
-    recommendationScore:
-      provider.recommendation_score === null || provider.recommendation_score === undefined
-        ? null
-        : Number(provider.recommendation_score),
-    profileId: data.id as string,
-    bookingMode: (data.booking_mode as "instant" | "request") ?? "request",
-    offeredServices: ((data.offered_services as string[] | null) ?? []).filter(
-      (value): value is "space" | "entertainment" | "balloons" | "cakes" =>
-        value === "space" || value === "entertainment" || value === "balloons" || value === "cakes",
-    ),
-    animatorTypes: (data.animator_types as string[] | null) ?? [],
-    themes: (data.themes as string[] | null) ?? [],
-    activities: (data.activities as string[] | null) ?? [],
-    ageRanges: (data.age_ranges as string[] | null) ?? [],
-    serviceAreaSectors: (data.service_area_sectors as string[] | null) ?? [],
-    priceMin: Number(data.price_min),
-    priceMax: Number(data.price_max),
-  };
+  return mapProfileRow(preferred);
 }
 
 export async function updateProviderProfile(
@@ -284,6 +305,10 @@ export async function updateProviderProfile(
     serviceAreaSectors: string[];
     priceMin: number;
     priceMax: number;
+    providerName?: string;
+    address?: string | null;
+    phone?: string | null;
+    website?: string | null;
   },
 ): Promise<void> {
   const { error } = await supabase
@@ -306,29 +331,105 @@ export async function updateProviderProfile(
   if (error) {
     throw new Error(`Failed to update provider profile: ${error.message}`);
   }
+
+  const identityPatch: Record<string, unknown> = {};
+  if (input.providerName !== undefined) identityPatch.name = input.providerName;
+  if (input.address !== undefined) identityPatch.address = input.address;
+  if (input.phone !== undefined) identityPatch.phone = input.phone;
+  if (input.website !== undefined) identityPatch.website = input.website;
+
+  if (Object.keys(identityPatch).length > 0) {
+    identityPatch.updated_at = new Date().toISOString();
+    const { error: providerError } = await supabase
+      .from("providers")
+      .update(identityPatch)
+      .eq("id", providerId)
+      .like("place_id", "manual:%");
+
+    if (providerError) {
+      throw new Error(`Failed to update provider identity: ${providerError.message}`);
+    }
+  }
 }
 
-export async function updateProviderAvailability(
+export async function upsertProviderAvailability(
   supabase: SupabaseClient,
   providerId: string,
-  input: { date: string; slot: "morning" | "afternoon"; status: "available" | "limited" | "booked" },
+  input: {
+    id?: string;
+    startsAt: string;
+    endsAt: string;
+    status: "available" | "limited" | "booked";
+  },
+): Promise<{ id: string }> {
+  if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) {
+    throw new Error("endsAt must be after startsAt");
+  }
+
+  const date = formatBucharestDate(new Date(input.startsAt));
+  const payload = {
+    provider_id: providerId,
+    date,
+    starts_at: input.startsAt,
+    ends_at: input.endsAt,
+    status: input.status,
+    source_type: "manual",
+    source_version: "provider_console_v2",
+    generated_at: new Date().toISOString(),
+  };
+
+  if (input.id) {
+    const { data, error } = await supabase
+      .from("provider_availability")
+      .update(payload)
+      .eq("id", input.id)
+      .eq("provider_id", providerId)
+      .select("id")
+      .single();
+    if (error) {
+      throw new Error(`Failed to update provider availability: ${error.message}`);
+    }
+    return { id: data.id as string };
+  }
+
+  const { data, error } = await supabase
+    .from("provider_availability")
+    .upsert(payload, { onConflict: "provider_id,starts_at,ends_at,source_type" })
+    .select("id")
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to upsert provider availability: ${error.message}`);
+  }
+  return { id: data.id as string };
+}
+
+export async function deleteProviderAvailability(
+  supabase: SupabaseClient,
+  providerId: string,
+  id: string,
 ): Promise<void> {
   const { error } = await supabase
     .from("provider_availability")
-    .upsert(
-      {
-        provider_id: providerId,
-        date: input.date,
-        slot: input.slot,
-        status: input.status,
-        source_type: "manual",
-        source_version: "provider_console_v1",
-        generated_at: new Date().toISOString(),
-      },
-      { onConflict: "provider_id,date,slot,source_type" },
-    );
+    .delete()
+    .eq("id", id)
+    .eq("provider_id", providerId);
 
   if (error) {
-    throw new Error(`Failed to update provider availability: ${error.message}`);
+    throw new Error(`Failed to delete provider availability: ${error.message}`);
   }
+}
+
+/** @deprecated use upsertProviderAvailability */
+export async function updateProviderAvailability(
+  supabase: SupabaseClient,
+  providerId: string,
+  input: {
+    startsAt: string;
+    endsAt: string;
+    status: "available" | "limited" | "booked";
+    id?: string;
+  },
+): Promise<void> {
+  await upsertProviderAvailability(supabase, providerId, input);
 }

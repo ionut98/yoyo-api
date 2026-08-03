@@ -33,8 +33,8 @@ export async function requestPackageBooking(
       packageId: pkg.id,
       packageItemId: item.id,
       providerId: item.providerId,
-      date: item.date,
-      slot: item.slot,
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
       expiresAt,
     })),
   );

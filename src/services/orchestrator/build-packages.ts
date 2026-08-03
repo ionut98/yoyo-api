@@ -4,6 +4,7 @@ import type {
   EffectiveAvailabilityRow,
   ProviderProfileRow,
 } from "../../repositories/provider-enrichment.js";
+import { intervalsOverlap } from "../../lib/time-intervals.js";
 import { sectorFitScore } from "./sector-fit.js";
 
 type CandidateItem = PackageRecommendationDto["items"][number];
@@ -15,18 +16,19 @@ function hasService(
   return profile.offeredServices.includes(role);
 }
 
-function availableOnSlot(
+function availableOnInterval(
   availability: EffectiveAvailabilityRow[],
   providerId: string,
-  date: string,
-  slot: "morning" | "afternoon",
+  startsAt: string,
+  endsAt: string,
 ): boolean {
   return availability.some(
     (row) =>
       row.providerId === providerId &&
-      row.date === date &&
-      row.slot === slot &&
-      (row.status === "available" || row.status === "limited"),
+      (row.status === "available" || row.status === "limited") &&
+      // Prefer covering the requested interval fully
+      Date.parse(row.startsAt) <= Date.parse(startsAt) &&
+      Date.parse(row.endsAt) >= Date.parse(endsAt),
   );
 }
 
@@ -38,7 +40,8 @@ function createItem(
   profile: ProviderProfileRow,
   role: "space" | "entertainment" | "balloons" | "cakes",
   date: string,
-  slot: "morning" | "afternoon",
+  startsAt: string,
+  endsAt: string,
 ): CandidateItem {
   const priceEstimate =
     role === "space"
@@ -53,17 +56,18 @@ function createItem(
     providerName: profile.providerName,
     role,
     date,
-    slot,
+    startsAt,
+    endsAt,
     priceEstimate,
     bookingMode: profile.bookingMode,
     itemStatus: "proposed",
     categories: profile.categories,
-    address: null,
+    address: profile.address,
     city: profile.city,
     photoUrl: null,
     rating: profile.rating,
     reviewCount: profile.reviewCount,
-    website: null,
+    website: profile.website,
     mapsUrl: null,
   };
 }
@@ -94,9 +98,10 @@ export function buildPackageCandidates(options: {
   providers: ProviderProfileRow[];
   availability: EffectiveAvailabilityRow[];
   date: string;
-  slot: "morning" | "afternoon";
+  startsAt: string;
+  endsAt: string;
 }): Array<Omit<PackageRecommendationDto, "score" | "scoreBreakdown" | "reasons">> {
-  const { party, providers, availability, date, slot } = options;
+  const { party, providers, availability, date, startsAt, endsAt } = options;
   const roles = wantedRoles(party);
   const venues = providers
     .filter((provider) => hasService(provider, "space"))
@@ -109,16 +114,16 @@ export function buildPackageCandidates(options: {
     [];
 
   for (const venue of venues.slice(0, 12)) {
-    if (!availableOnSlot(availability, venue.providerId, date, slot)) continue;
+    if (!availableOnInterval(availability, venue.providerId, startsAt, endsAt)) continue;
 
-    const items: CandidateItem[] = [createItem(venue, "space", date, slot)];
+    const items: CandidateItem[] = [createItem(venue, "space", date, startsAt, endsAt)];
     let valid = true;
 
     for (const role of roles) {
       if (role === "space") continue;
 
       if (hasService(venue, role)) {
-        items.push(createItem(venue, role, date, slot));
+        items.push(createItem(venue, role, date, startsAt, endsAt));
         continue;
       }
 
@@ -127,7 +132,7 @@ export function buildPackageCandidates(options: {
           (provider) =>
             provider.providerId !== venue.providerId &&
             hasService(provider, role) &&
-            availableOnSlot(availability, provider.providerId, date, slot),
+            availableOnInterval(availability, provider.providerId, startsAt, endsAt),
         )
         .sort((a, b) => {
           const fitDiff = profileSectorFit(party.sector, b) - profileSectorFit(party.sector, a);
@@ -140,7 +145,7 @@ export function buildPackageCandidates(options: {
         break;
       }
 
-      items.push(createItem(alternative, role, date, slot));
+      items.push(createItem(alternative, role, date, startsAt, endsAt));
     }
 
     if (!valid) continue;
@@ -160,7 +165,8 @@ export function buildPackageCandidates(options: {
       status: "proposed",
       bookingKind: bookingKindFromItems(items),
       targetDate: date,
-      targetSlot: slot,
+      targetStartsAt: startsAt,
+      targetEndsAt: endsAt,
       estimatedPrice,
       items,
     });
@@ -168,3 +174,6 @@ export function buildPackageCandidates(options: {
 
   return candidates;
 }
+
+// Re-export for tests that may check overlap helpers indirectly
+export { intervalsOverlap };

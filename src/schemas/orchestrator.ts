@@ -21,12 +21,12 @@ export const packageRoleSchema = z.enum([
   "balloons",
   "cakes",
 ]);
-export const slotSchema = z.enum(["morning", "afternoon"]);
 export const availabilityStatusSchema = z.enum(["available", "limited", "booked"]);
 export const holdStatusSchema = z.enum(["active", "released", "converted", "expired"]);
 export const accountRoleSchema = z.enum(["parent", "provider", "admin"]);
 export const providerMembershipRoleSchema = z.enum(["owner", "manager", "staff"]);
 export const offeredServiceSchema = z.enum(["space", "entertainment", "balloons", "cakes"]);
+export const providerCategorySchema = z.enum(["venue", "entertainment", "balloons", "cakes"]);
 
 export const priceRangeSchema = z.object({
   min: z.number().int().nonnegative(),
@@ -39,11 +39,12 @@ export const packageItemSchema = z.object({
   providerName: z.string(),
   role: packageRoleSchema,
   date: z.string(),
-  slot: slotSchema,
+  startsAt: z.string(),
+  endsAt: z.string(),
   priceEstimate: z.number().int().nonnegative(),
   bookingMode: bookingModeSchema,
   itemStatus: z.enum(["proposed", "held", "confirmed", "declined", "expired", "cancelled"]),
-  categories: z.array(z.enum(["venue", "entertainment", "balloons", "cakes"])).default([]),
+  categories: z.array(providerCategorySchema).default([]),
   address: z.string().nullable().default(null),
   city: z.string().nullable().default(null),
   photoUrl: z.string().nullable().default(null),
@@ -59,7 +60,8 @@ export const packageRecommendationSchema = z.object({
   status: packageStatusSchema,
   bookingKind: bookingKindSchema,
   targetDate: z.string(),
-  targetSlot: slotSchema,
+  targetStartsAt: z.string(),
+  targetEndsAt: z.string(),
   estimatedPrice: priceRangeSchema,
   score: z.number(),
   scoreBreakdown: z.record(z.string(), z.number()),
@@ -71,20 +73,31 @@ export const recommendationsResponseSchema = z.object({
   data: z.array(packageRecommendationSchema),
 });
 
-export const providerCalendarDaySchema = z.object({
-  date: z.string(),
-  morning: availabilityStatusSchema,
-  afternoon: availabilityStatusSchema,
+export const providerCalendarEventSchema = z.object({
+  id: z.string().uuid(),
+  startsAt: z.string(),
+  endsAt: z.string(),
+  status: availabilityStatusSchema,
+  source: z.enum(["availability", "hold", "booking"]),
 });
 
 export const providerCalendarResponseSchema = z.object({
   providerId: z.string().uuid(),
-  days: z.array(providerCalendarDaySchema),
+  events: z.array(providerCalendarEventSchema),
 });
 
 export const providerProfileSchema = z.object({
   providerId: z.string().uuid(),
   providerName: z.string(),
+  placeId: z.string(),
+  isManual: z.boolean(),
+  address: z.string().nullable(),
+  phone: z.string().nullable(),
+  website: z.string().nullable(),
+  categories: z.array(providerCategorySchema),
+  homeSector: z.string().nullable(),
+  rating: z.number().nullable(),
+  reviewCount: z.number().nullable(),
   bookingMode: bookingModeSchema,
   offeredServices: z.array(offeredServiceSchema),
   animatorTypes: z.array(z.string()),
@@ -115,9 +128,15 @@ export const providerPackageItemActionSchema = z.object({
 
 export const updateProviderAvailabilityBodySchema = z.object({
   providerId: z.string().uuid(),
-  date: z.string().min(10),
-  slot: slotSchema,
+  startsAt: z.string().min(10),
+  endsAt: z.string().min(10),
   status: availabilityStatusSchema,
+  id: z.string().uuid().optional(),
+});
+
+export const deleteProviderAvailabilityBodySchema = z.object({
+  providerId: z.string().uuid(),
+  id: z.string().uuid(),
 });
 
 export const updateProviderProfileBodySchema = z.object({
@@ -131,8 +150,33 @@ export const updateProviderProfileBodySchema = z.object({
   serviceAreaSectors: z.array(z.string()).default([]),
   priceMin: z.number().int().nonnegative(),
   priceMax: z.number().int().nonnegative(),
+  // Editable only for manual providers
+  providerName: z.string().min(2).max(120).optional(),
+  address: z.string().max(300).nullable().optional(),
+  phone: z.string().max(40).nullable().optional(),
+  website: z.string().max(300).nullable().optional(),
+});
+
+export const createProviderBodySchema = z.object({
+  name: z.string().min(2).max(120),
+  category: providerCategorySchema,
+  city: z.string().min(2).default("București"),
+  address: z.string().min(3).max(300),
+  phone: z.string().max(40).nullable().optional(),
+  website: z.string().max(300).nullable().optional(),
+  bookingMode: bookingModeSchema.default("request"),
+  offeredServices: z.array(offeredServiceSchema).min(1).optional(),
+  animatorTypes: z.array(z.string()).default([]),
+  themes: z.array(z.string()).default([]),
+  activities: z.array(z.string()).default([]),
+  ageRanges: z.array(z.string()).default([]),
+  serviceAreaSectors: z.array(z.string()).default([]),
+  priceMin: z.number().int().nonnegative(),
+  priceMax: z.number().int().nonnegative(),
+  homeSector: z.string().nullable().optional(),
 });
 
 export type PackageRecommendationDto = z.infer<typeof packageRecommendationSchema>;
 export type PackageItemDto = z.infer<typeof packageItemSchema>;
 export type ProviderProfileDto = z.infer<typeof providerProfileSchema>;
+export type CreateProviderBody = z.infer<typeof createProviderBodySchema>;

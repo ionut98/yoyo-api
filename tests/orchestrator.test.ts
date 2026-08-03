@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { buildPackageCandidates } from "../src/services/orchestrator/build-packages.js";
-import { resolveTargetDate, resolveTargetSlot } from "../src/services/orchestrator/resolve-target-date.js";
+import {
+  resolveTargetDate,
+  resolveTargetSlotForDate,
+} from "../src/services/orchestrator/resolve-target-date.js";
 import { budgetCapFromParty, calculateScore } from "../src/services/orchestrator/score-packages.js";
 import { sectorFitScore } from "../src/services/orchestrator/sector-fit.js";
 import type { ProviderProfileRow } from "../src/repositories/provider-enrichment.js";
+import { bucharestDateTimeIso } from "../src/lib/time-intervals.js";
 
 const party = {
   id: "10000000-0000-4000-8000-000000000001",
@@ -22,10 +26,18 @@ const party = {
   updatedAt: "2026-07-28T10:00:00.000Z",
 };
 
+const targetStartsAt = bucharestDateTimeIso("2026-08-15", 16, 0);
+const targetEndsAt = bucharestDateTimeIso("2026-08-15", 18, 0);
+
 function baseProfile(overrides: Partial<ProviderProfileRow>): ProviderProfileRow {
   return {
     providerId: "20000000-0000-4000-8000-000000000001",
     providerName: "Provider",
+    placeId: "place-1",
+    isManual: false,
+    address: null,
+    phone: null,
+    website: null,
     categories: ["venue"],
     city: "București",
     homeSector: "s3",
@@ -49,7 +61,9 @@ function baseProfile(overrides: Partial<ProviderProfileRow>): ProviderProfileRow
 describe("resolveTargetDate", () => {
   it("uses explicit preferred date when present", () => {
     expect(resolveTargetDate(party)).toBe("2026-08-15");
-    expect(resolveTargetSlot()).toBe("afternoon");
+    const interval = resolveTargetSlotForDate("2026-08-15");
+    expect(interval.startsAt).toBe(targetStartsAt);
+    expect(interval.endsAt).toBe(targetEndsAt);
   });
 });
 
@@ -109,17 +123,21 @@ describe("buildPackageCandidates", () => {
     }),
   ];
 
-  const availability = profiles.flatMap((profile) => [
+  const availability = profiles.flatMap((profile, index) => [
     {
+      id: `40000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
       providerId: profile.providerId,
       date: "2026-08-15",
-      slot: "afternoon" as const,
+      startsAt: bucharestDateTimeIso("2026-08-15", 16, 0),
+      endsAt: bucharestDateTimeIso("2026-08-15", 18, 0),
       status: "available" as const,
     },
     {
+      id: `50000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
       providerId: profile.providerId,
       date: "2026-08-15",
-      slot: "morning" as const,
+      startsAt: bucharestDateTimeIso("2026-08-15", 10, 0),
+      endsAt: bucharestDateTimeIso("2026-08-15", 12, 0),
       status: "available" as const,
     },
   ]);
@@ -130,7 +148,8 @@ describe("buildPackageCandidates", () => {
       providers: profiles,
       availability,
       date: "2026-08-15",
-      slot: "afternoon",
+      startsAt: targetStartsAt,
+      endsAt: targetEndsAt,
     });
 
     expect(candidates.length).toBeGreaterThan(0);
@@ -146,7 +165,8 @@ describe("buildPackageCandidates", () => {
       providers: profiles,
       availability,
       date: "2026-08-15",
-      slot: "afternoon",
+      startsAt: targetStartsAt,
+      endsAt: targetEndsAt,
     });
 
     const firstVenue = candidates[0]?.items.find((item) => item.role === "space");
@@ -162,7 +182,8 @@ describe("calculateScore", () => {
       status: "proposed",
       bookingKind: "fully_instant",
       targetDate: "2026-08-15",
-      targetSlot: "afternoon",
+      targetStartsAt,
+      targetEndsAt,
       estimatedPrice: { min: 2200, max: 2800 },
       items: [],
     });
@@ -172,7 +193,8 @@ describe("calculateScore", () => {
       status: "proposed",
       bookingKind: "fully_request",
       targetDate: "2026-08-15",
-      targetSlot: "afternoon",
+      targetStartsAt,
+      targetEndsAt,
       estimatedPrice: { min: 2200, max: 2800 },
       items: [],
     });
@@ -204,7 +226,8 @@ describe("calculateScore", () => {
         status: "proposed",
         bookingKind: "mixed",
         targetDate: "2026-08-15",
-        targetSlot: "afternoon",
+        targetStartsAt,
+        targetEndsAt,
         estimatedPrice: { min: 2200, max: 2800 },
         items: [
           {
@@ -213,7 +236,8 @@ describe("calculateScore", () => {
             providerName: "Near",
             role: "space",
             date: "2026-08-15",
-            slot: "afternoon",
+            startsAt: targetStartsAt,
+            endsAt: targetEndsAt,
             priceEstimate: 1500,
             bookingMode: "instant",
             itemStatus: "proposed",
@@ -239,7 +263,8 @@ describe("calculateScore", () => {
         status: "proposed",
         bookingKind: "mixed",
         targetDate: "2026-08-15",
-        targetSlot: "afternoon",
+        targetStartsAt,
+        targetEndsAt,
         estimatedPrice: { min: 2200, max: 2800 },
         items: [
           {
@@ -248,7 +273,8 @@ describe("calculateScore", () => {
             providerName: "Far",
             role: "space",
             date: "2026-08-15",
-            slot: "afternoon",
+            startsAt: targetStartsAt,
+            endsAt: targetEndsAt,
             priceEstimate: 1500,
             bookingMode: "instant",
             itemStatus: "proposed",
