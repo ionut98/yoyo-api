@@ -25,7 +25,7 @@ function availableOnInterval(
   return availability.some(
     (row) =>
       row.providerId === providerId &&
-      (row.status === "available" || row.status === "limited") &&
+      row.status === "available" &&
       // Prefer covering the requested interval fully
       Date.parse(row.startsAt) <= Date.parse(startsAt) &&
       Date.parse(row.endsAt) >= Date.parse(endsAt),

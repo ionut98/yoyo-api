@@ -34,7 +34,7 @@ export type EffectiveAvailabilityRow = {
   date: string;
   startsAt: string;
   endsAt: string;
-  status: "available" | "limited" | "booked";
+  status: "available" | "booked";
 };
 
 function normalizeCategory(value: string): ProviderCategory | null {
@@ -242,9 +242,7 @@ export async function listEffectiveAvailabilityRange(
       date: (row.date as string) ?? formatBucharestDate(new Date(startsAt)),
       startsAt,
       endsAt,
-      status: blocked
-        ? ("booked" as const)
-        : ((row.status as "available" | "limited" | "booked") ?? "booked"),
+      status: blocked || row.status === "booked" ? ("booked" as const) : ("available" as const),
     };
   });
 }
@@ -359,7 +357,7 @@ export async function upsertProviderAvailability(
     id?: string;
     startsAt: string;
     endsAt: string;
-    status: "available" | "limited" | "booked";
+    status: "available" | "booked";
   },
 ): Promise<{ id: string }> {
   if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) {
@@ -427,7 +425,7 @@ export async function updateProviderAvailability(
   input: {
     startsAt: string;
     endsAt: string;
-    status: "available" | "limited" | "booked";
+    status: "available" | "booked";
     id?: string;
   },
 ): Promise<void> {

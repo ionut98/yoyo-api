@@ -21,7 +21,7 @@ export const packageRoleSchema = z.enum([
   "balloons",
   "cakes",
 ]);
-export const availabilityStatusSchema = z.enum(["available", "limited", "booked"]);
+export const availabilityStatusSchema = z.enum(["available", "booked"]);
 export const holdStatusSchema = z.enum(["active", "released", "converted", "expired"]);
 export const accountRoleSchema = z.enum(["parent", "provider", "admin"]);
 export const providerMembershipRoleSchema = z.enum(["owner", "manager", "staff"]);
