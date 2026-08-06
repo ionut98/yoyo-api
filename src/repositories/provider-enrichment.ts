@@ -232,6 +232,7 @@ export async function listEffectiveAvailabilityRange(
     packageId: (row.package_id as string | null) ?? null,
     packageItemId: (row.package_item_id as string | null) ?? null,
     source: "hold" as const,
+    id: `hold:${row.id as string}`,
   }));
 
   const bookingBlockers = ((confirmedItems ?? []) as Array<Record<string, unknown>>).map((row) => ({
@@ -241,82 +242,91 @@ export async function listEffectiveAvailabilityRange(
     packageId: (row.package_id as string | null) ?? null,
     packageItemId: (row.id as string | null) ?? null,
     source: "booking" as const,
+    id: `booking:${row.id as string}`,
   }));
 
   const blockers = [...holdBlockers, ...bookingBlockers];
 
+  // Availability rows keep source="availability". Never copy packageId onto them —
+  // that made Liber mirrors open as "Cerere în așteptare" beside the real hold.
   const availabilityEvents: EffectiveAvailabilityRow[] = (baseRows ?? []).map((row) => {
     const startsAt = row.starts_at as string;
     const endsAt = row.ends_at as string;
     const providerId = row.provider_id as string;
+    const dbBooked = row.status === "booked";
     const matchedBlock = blockers.find(
       (block) =>
         block.providerId === providerId &&
         intervalsOverlap(startsAt, endsAt, block.startsAt, block.endsAt),
     );
-    const blocked = Boolean(matchedBlock) || row.status === "booked";
+
     return {
       id: row.id as string,
       providerId,
       date: (row.date as string) ?? formatBucharestDate(new Date(startsAt)),
       startsAt,
       endsAt,
-      status: blocked ? ("booked" as const) : ("available" as const),
-      source: matchedBlock?.source ?? ("availability" as const),
-      packageId: matchedBlock?.packageId ?? null,
-      packageItemId: matchedBlock?.packageItemId ?? null,
+      // Overlapping holds/bookings still count as booked for matching.
+      status: dbBooked || Boolean(matchedBlock) ? ("booked" as const) : ("available" as const),
+      source: "availability" as const,
+      packageId: null,
+      packageItemId: null,
     };
   });
 
-  const coveredKeys = new Set(
-    availabilityEvents.map((row) => `${row.providerId}|${row.startsAt}|${row.endsAt}`),
-  );
+  const bookingEvents: EffectiveAvailabilityRow[] = blockers.map((block) => ({
+    id: block.id,
+    providerId: block.providerId,
+    date: formatBucharestDate(new Date(block.startsAt)),
+    startsAt: block.startsAt,
+    endsAt: block.endsAt,
+    status: "booked" as const,
+    source: block.source,
+    packageId: block.packageId,
+    packageItemId: block.packageItemId,
+  }));
 
-  const extraEvents: EffectiveAvailabilityRow[] = [];
+  return dedupeAvailabilityEvents([...availabilityEvents, ...bookingEvents]);
+}
 
-  // Surface confirmed bookings even when no matching availability row exists yet.
-  for (const row of (confirmedItems ?? []) as Array<Record<string, unknown>>) {
-    const providerId = row.provider_id as string;
-    const startsAt = row.starts_at as string;
-    const endsAt = row.ends_at as string;
-    const key = `${providerId}|${startsAt}|${endsAt}`;
-    if (coveredKeys.has(key)) continue;
-    coveredKeys.add(key);
-    extraEvents.push({
-      id: `booking:${row.id as string}`,
-      providerId,
-      date: formatBucharestDate(new Date(startsAt)),
-      startsAt,
-      endsAt,
-      status: "booked",
-      source: "booking",
-      packageId: (row.package_id as string | null) ?? null,
-      packageItemId: (row.id as string | null) ?? null,
-    });
+function intervalKey(providerId: string, startsAt: string, endsAt: string): string {
+  return `${providerId}|${new Date(startsAt).toISOString()}|${new Date(endsAt).toISOString()}`;
+}
+
+function eventRank(row: EffectiveAvailabilityRow): number {
+  // Prefer real booking/hold rows (with package link) over availability mirrors.
+  if (row.source === "booking") return 300;
+  if (row.source === "hold") return 200;
+  if (row.status === "booked") return 100;
+  return 0;
+}
+
+function dedupeAvailabilityEvents(rows: EffectiveAvailabilityRow[]): EffectiveAvailabilityRow[] {
+  const byExactKey = new Map<string, EffectiveAvailabilityRow>();
+
+  for (const row of rows) {
+    const key = intervalKey(row.providerId, row.startsAt, row.endsAt);
+    const existing = byExactKey.get(key);
+    if (!existing || eventRank(row) > eventRank(existing)) {
+      byExactKey.set(key, row);
+    }
   }
 
-  // Pending holds should also appear on the calendar (request awaiting accept).
-  for (const row of (activeHolds ?? []) as Array<Record<string, unknown>>) {
-    const providerId = row.provider_id as string;
-    const startsAt = row.starts_at as string;
-    const endsAt = row.ends_at as string;
-    const key = `${providerId}|${startsAt}|${endsAt}`;
-    if (coveredKeys.has(key)) continue;
-    coveredKeys.add(key);
-    extraEvents.push({
-      id: `hold:${row.id as string}`,
-      providerId,
-      date: formatBucharestDate(new Date(startsAt)),
-      startsAt,
-      endsAt,
-      status: "booked",
-      source: "hold",
-      packageId: (row.package_id as string | null) ?? null,
-      packageItemId: (row.package_item_id as string | null) ?? null,
-    });
-  }
+  const exact = [...byExactKey.values()];
 
-  return [...availabilityEvents, ...extraEvents];
+  // Drop availability booked mirrors covered by a booking/hold (exact or overlap).
+  return exact.filter((row) => {
+    if (row.source !== "availability" || row.status !== "booked") return true;
+
+    const coveredByBooking = exact.some(
+      (other) =>
+        other !== row &&
+        other.providerId === row.providerId &&
+        (other.source === "booking" || other.source === "hold") &&
+        intervalsOverlap(row.startsAt, row.endsAt, other.startsAt, other.endsAt),
+    );
+    return !coveredByBooking;
+  });
 }
 
 export async function getProviderProfileForMember(
