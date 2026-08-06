@@ -25,7 +25,9 @@ export function createPackageRequestRoutes(env: Env) {
       return c.json(pkg);
     } catch (error) {
       console.error(error);
-      return c.json({ error: error instanceof Error ? error.message : "Failed to request package" }, 500);
+      const message = error instanceof Error ? error.message : "Failed to request package";
+      const unavailable = message.includes("is not available");
+      return c.json({ error: message }, unavailable ? 409 : 500);
     }
   });
 

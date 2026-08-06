@@ -197,7 +197,7 @@ export async function listEffectiveAvailabilityRange(
 
   const { data: activeHolds, error: holdsError } = await supabase
     .from("slot_holds")
-    .select("provider_id, starts_at, ends_at")
+    .select("id, provider_id, starts_at, ends_at")
     .in("provider_id", options.providerIds)
     .lt("starts_at", options.endIso)
     .gt("ends_at", options.startIso)
@@ -252,15 +252,17 @@ export async function listEffectiveAvailabilityRange(
     availabilityEvents.map((row) => `${row.providerId}|${row.startsAt}|${row.endsAt}`),
   );
 
+  const extraEvents: EffectiveAvailabilityRow[] = [];
+
   // Surface confirmed bookings even when no matching availability row exists yet.
-  const bookingEvents: EffectiveAvailabilityRow[] = [];
   for (const row of confirmedItems ?? []) {
     const providerId = row.provider_id as string;
     const startsAt = row.starts_at as string;
     const endsAt = row.ends_at as string;
     const key = `${providerId}|${startsAt}|${endsAt}`;
     if (coveredKeys.has(key)) continue;
-    bookingEvents.push({
+    coveredKeys.add(key);
+    extraEvents.push({
       id: `booking:${providerId}:${startsAt}:${endsAt}`,
       providerId,
       date: formatBucharestDate(new Date(startsAt)),
@@ -271,7 +273,26 @@ export async function listEffectiveAvailabilityRange(
     });
   }
 
-  return [...availabilityEvents, ...bookingEvents];
+  // Pending holds should also appear on the calendar (request awaiting accept).
+  for (const row of activeHolds ?? []) {
+    const providerId = row.provider_id as string;
+    const startsAt = row.starts_at as string;
+    const endsAt = row.ends_at as string;
+    const key = `${providerId}|${startsAt}|${endsAt}`;
+    if (coveredKeys.has(key)) continue;
+    coveredKeys.add(key);
+    extraEvents.push({
+      id: `hold:${row.id as string}`,
+      providerId,
+      date: formatBucharestDate(new Date(startsAt)),
+      startsAt,
+      endsAt,
+      status: "booked",
+      source: "hold",
+    });
+  }
+
+  return [...availabilityEvents, ...extraEvents];
 }
 
 export async function getProviderProfileForMember(

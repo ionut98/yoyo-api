@@ -22,7 +22,7 @@ function availableOnInterval(
   startsAt: string,
   endsAt: string,
 ): boolean {
-  return availability.some(
+  const coveredByFreeSlot = availability.some(
     (row) =>
       row.providerId === providerId &&
       row.status === "available" &&
@@ -30,7 +30,20 @@ function availableOnInterval(
       Date.parse(row.startsAt) <= Date.parse(startsAt) &&
       Date.parse(row.endsAt) >= Date.parse(endsAt),
   );
+  if (!coveredByFreeSlot) return false;
+
+  // A locked/booked interval must never receive new proposals, even if a wider
+  // "available" row still exists for the same window (common after re-seed).
+  const locked = availability.some(
+    (row) =>
+      row.providerId === providerId &&
+      row.status === "booked" &&
+      intervalsOverlap(row.startsAt, row.endsAt, startsAt, endsAt),
+  );
+  return !locked;
 }
+
+export { availableOnInterval };
 
 function profileSectorFit(partySector: string | null | undefined, profile: ProviderProfileRow): number {
   return sectorFitScore(partySector, profile.serviceAreaSectors, profile.homeSector);

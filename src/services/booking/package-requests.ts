@@ -1,7 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getPackageById, updatePackageItemState, updatePackageRequestState } from "../../repositories/package-requests.js";
 import { expireStaleSlotHolds, insertSlotHolds, releaseSlotHoldsForPackage } from "../../repositories/slot-holds.js";
-import { upsertProviderAvailability } from "../../repositories/provider-enrichment.js";
+import {
+  listEffectiveAvailabilityRange,
+  upsertProviderAvailability,
+} from "../../repositories/provider-enrichment.js";
+import { availableOnInterval } from "../orchestrator/build-packages.js";
 
 const HOLD_TTL_MS = 1000 * 60 * 60 * 2;
 
@@ -22,6 +26,50 @@ async function markItemBookedOnCalendar(
     endsAt: item.endsAt,
     status: "booked",
   });
+
+  // Flip any overlapping free rows so matching cannot reuse a wider Liber window.
+  const { error } = await supabase
+    .from("provider_availability")
+    .update({
+      status: "booked",
+      generated_at: new Date().toISOString(),
+      source_version: "provider_console_v2",
+    })
+    .eq("provider_id", item.providerId)
+    .eq("status", "available")
+    .lt("starts_at", item.endsAt)
+    .gt("ends_at", item.startsAt);
+
+  if (error) {
+    throw new Error(`Failed to lock overlapping availability: ${error.message}`);
+  }
+}
+
+async function assertProvidersStillAvailable(
+  supabase: SupabaseClient,
+  items: Array<{ providerId: string; startsAt: string; endsAt: string }>,
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const starts = items.map((item) => Date.parse(item.startsAt));
+  const ends = items.map((item) => Date.parse(item.endsAt));
+  const startIso = new Date(Math.min(...starts)).toISOString();
+  const endIso = new Date(Math.max(...ends)).toISOString();
+  const providerIds = [...new Set(items.map((item) => item.providerId))];
+
+  const availability = await listEffectiveAvailabilityRange(supabase, {
+    providerIds,
+    startIso,
+    endIso,
+  });
+
+  for (const item of items) {
+    if (!availableOnInterval(availability, item.providerId, item.startsAt, item.endsAt)) {
+      throw new Error(
+        `Provider ${item.providerId} is not available for ${item.startsAt}–${item.endsAt}`,
+      );
+    }
+  }
 }
 
 export async function requestPackageBooking(
@@ -36,6 +84,15 @@ export async function requestPackageBooking(
   if (pkg.status !== "proposed") {
     return pkg;
   }
+
+  await assertProvidersStillAvailable(
+    supabase,
+    pkg.items.map((item) => ({
+      providerId: item.providerId,
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+    })),
+  );
 
   const expiresAt = new Date(Date.now() + HOLD_TTL_MS).toISOString();
 

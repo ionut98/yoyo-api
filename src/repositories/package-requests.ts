@@ -253,6 +253,8 @@ export async function updatePackageItemState(
   }
 }
 
+const PROVIDER_INBOX_ITEM_STATUSES = new Set(["held", "confirmed", "declined"]);
+
 export async function listProviderPackages(
   supabase: SupabaseClient,
   providerId: string,
@@ -260,13 +262,21 @@ export async function listProviderPackages(
   const { data, error } = await supabase
     .from("party_packages")
     .select(PACKAGE_SELECT)
+    .neq("status", "proposed")
     .order("created_at", { ascending: false });
 
   if (error) {
     throw new Error(`Failed to list provider packages: ${error.message}`);
   }
 
+  // Only surface packages where this provider has a real request/response item —
+  // bare orchestrator proposals (status=proposed / item=proposed) are not inbox requests.
   return (data ?? [])
     .map(mapPackageRow)
-    .filter((pkg) => pkg.items.some((item) => item.providerId === providerId));
+    .filter((pkg) =>
+      pkg.items.some(
+        (item) =>
+          item.providerId === providerId && PROVIDER_INBOX_ITEM_STATUSES.has(item.itemStatus),
+      ),
+    );
 }
