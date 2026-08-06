@@ -67,6 +67,24 @@ export const packageRecommendationSchema = z.object({
   scoreBreakdown: z.record(z.string(), z.number()),
   reasons: z.array(z.string()),
   items: z.array(packageItemSchema),
+  requestedAt: z.string().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  party: z
+    .object({
+      parentName: z.string().nullable(),
+      parentEmail: z.string().nullable(),
+      sector: z.string().nullable(),
+      ageRange: z.string().nullable(),
+      budget: z.string().nullable(),
+      guestCount: z.string().nullable(),
+      themeId: z.string().nullable(),
+      themeCustom: z.string().nullable(),
+      activities: z.array(z.string()).default([]),
+      city: z.string().nullable(),
+      preferredDate: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export const recommendationsResponseSchema = z.object({
@@ -74,11 +92,14 @@ export const recommendationsResponseSchema = z.object({
 });
 
 export const providerCalendarEventSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string(),
   startsAt: z.string(),
   endsAt: z.string(),
   status: availabilityStatusSchema,
   source: z.enum(["availability", "hold", "booking"]),
+  packageId: z.string().uuid().nullable().optional(),
+  packageItemId: z.string().uuid().nullable().optional(),
+  title: z.string().nullable().optional(),
 });
 
 export const providerCalendarResponseSchema = z.object({

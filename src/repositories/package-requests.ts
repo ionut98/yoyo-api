@@ -92,6 +92,9 @@ function mapPackageRow(row: any): PackageRecommendationDto {
     score: Number(row.score ?? 0),
     scoreBreakdown: (row.score_breakdown as Record<string, number> | null) ?? {},
     reasons: (row.reasons as string[] | null) ?? [],
+    requestedAt: (row.requested_at as string | null | undefined) ?? null,
+    expiresAt: (row.expires_at as string | null | undefined) ?? null,
+    party: null,
     items: (row.party_package_items ?? []).map((item: any) => {
       const providerCard = mapProviderCard(item.provider);
       const startsAt = item.starts_at as string;
@@ -117,6 +120,79 @@ function mapPackageRow(row: any): PackageRecommendationDto {
       };
     }),
   };
+}
+
+async function attachPartyContext(
+  supabase: SupabaseClient,
+  packages: PackageRecommendationDto[],
+): Promise<PackageRecommendationDto[]> {
+  if (packages.length === 0) return packages;
+
+  const { data, error } = await supabase.rpc("get_packages_party_context", {
+    p_package_ids: packages.map((pkg) => pkg.id),
+  });
+
+  if (error) {
+    throw new Error(`Failed to load party context: ${error.message}`);
+  }
+
+  type PartyContext = {
+    parentName: string | null;
+    parentEmail: string | null;
+    sector: string | null;
+    ageRange: string | null;
+    budget: string | null;
+    guestCount: string | null;
+    themeId: string | null;
+    themeCustom: string | null;
+    activities: string[];
+    city: string | null;
+    preferredDate: string | null;
+    requestedAt: string | null;
+    expiresAt: string | null;
+  };
+
+  const byPackageId = new Map<string, PartyContext>();
+  for (const row of data ?? []) {
+    byPackageId.set(row.package_id as string, {
+      parentName: (row.parent_name as string | null) ?? null,
+      parentEmail: (row.parent_email as string | null) ?? null,
+      sector: (row.sector as string | null) ?? null,
+      ageRange: (row.age_range as string | null) ?? null,
+      budget: (row.budget as string | null) ?? null,
+      guestCount: (row.guest_count as string | null) ?? null,
+      themeId: (row.theme_id as string | null) ?? null,
+      themeCustom: (row.theme_custom as string | null) ?? null,
+      activities: (row.activities as string[] | null) ?? [],
+      city: (row.city as string | null) ?? null,
+      preferredDate: row.preferred_date ? String(row.preferred_date) : null,
+      requestedAt: (row.requested_at as string | null) ?? null,
+      expiresAt: (row.expires_at as string | null) ?? null,
+    });
+  }
+
+  return packages.map((pkg) => {
+    const context = byPackageId.get(pkg.id);
+    if (!context) return pkg;
+    return {
+      ...pkg,
+      requestedAt: pkg.requestedAt ?? context.requestedAt,
+      expiresAt: pkg.expiresAt ?? context.expiresAt,
+      party: {
+        parentName: context.parentName,
+        parentEmail: context.parentEmail,
+        sector: context.sector,
+        ageRange: context.ageRange,
+        budget: context.budget,
+        guestCount: context.guestCount,
+        themeId: context.themeId,
+        themeCustom: context.themeCustom,
+        activities: context.activities,
+        city: context.city,
+        preferredDate: context.preferredDate,
+      },
+    };
+  });
 }
 
 export async function deleteProposedPackagesForParty(
@@ -289,7 +365,7 @@ export async function listProviderPackages(
 
   // Only surface packages where this provider has a real request/response item —
   // bare orchestrator proposals (status=proposed / item=proposed) are not inbox requests.
-  return (data ?? [])
+  const packages = (data ?? [])
     .map(mapPackageRow)
     .filter((pkg) =>
       pkg.items.some(
@@ -297,4 +373,6 @@ export async function listProviderPackages(
           item.providerId === providerId && PROVIDER_INBOX_ITEM_STATUSES.has(item.itemStatus),
       ),
     );
+
+  return attachPartyContext(supabase, packages);
 }

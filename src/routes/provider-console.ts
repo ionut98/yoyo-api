@@ -204,6 +204,28 @@ export function createProviderConsoleRoutes(env: Env) {
         endIso,
       });
 
+      const packageIds = [
+        ...new Set(rows.map((row) => row.packageId).filter((id): id is string => Boolean(id))),
+      ];
+      const titleByPackageId = new Map<string, string>();
+      if (packageIds.length > 0) {
+        const { data: contexts, error: contextError } = await supabase.rpc(
+          "get_packages_party_context",
+          { p_package_ids: packageIds },
+        );
+        if (contextError) {
+          throw new Error(`Failed to load booking context: ${contextError.message}`);
+        }
+        for (const row of contexts ?? []) {
+          const name = (row.parent_name as string | null) ?? null;
+          const sector = (row.sector as string | null) ?? null;
+          const parts = [name, sector && sector !== "orice" ? sector.toUpperCase() : null].filter(
+            Boolean,
+          );
+          titleByPackageId.set(row.package_id as string, parts.join(" · ") || "Rezervare");
+        }
+      }
+
       return c.json({
         providerId,
         events: rows.map((row) => ({
@@ -212,6 +234,9 @@ export function createProviderConsoleRoutes(env: Env) {
           endsAt: row.endsAt,
           status: row.status,
           source: row.source ?? ("availability" as const),
+          packageId: row.packageId ?? null,
+          packageItemId: row.packageItemId ?? null,
+          title: row.packageId ? (titleByPackageId.get(row.packageId) ?? "Rezervare") : null,
         })),
       });
     } catch (error) {

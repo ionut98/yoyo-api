@@ -36,6 +36,8 @@ export type EffectiveAvailabilityRow = {
   endsAt: string;
   status: "available" | "booked";
   source?: "availability" | "booking" | "hold";
+  packageId?: string | null;
+  packageItemId?: string | null;
 };
 
 function normalizeCategory(value: string): ProviderCategory | null {
@@ -223,29 +225,46 @@ export async function listEffectiveAvailabilityRange(
     throw new Error(`Failed to load confirmed package items: ${itemsError.message}`);
   }
 
-  const blockers = [...(activeHolds ?? []), ...(confirmedItems ?? [])].map((row) => ({
+  const holdBlockers = ((activeHolds ?? []) as Array<Record<string, unknown>>).map((row) => ({
     providerId: row.provider_id as string,
     startsAt: row.starts_at as string,
     endsAt: row.ends_at as string,
+    packageId: (row.package_id as string | null) ?? null,
+    packageItemId: (row.package_item_id as string | null) ?? null,
+    source: "hold" as const,
   }));
+
+  const bookingBlockers = ((confirmedItems ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    providerId: row.provider_id as string,
+    startsAt: row.starts_at as string,
+    endsAt: row.ends_at as string,
+    packageId: (row.package_id as string | null) ?? null,
+    packageItemId: (row.id as string | null) ?? null,
+    source: "booking" as const,
+  }));
+
+  const blockers = [...holdBlockers, ...bookingBlockers];
 
   const availabilityEvents: EffectiveAvailabilityRow[] = (baseRows ?? []).map((row) => {
     const startsAt = row.starts_at as string;
     const endsAt = row.ends_at as string;
     const providerId = row.provider_id as string;
-    const blocked = blockers.some(
+    const matchedBlock = blockers.find(
       (block) =>
         block.providerId === providerId &&
         intervalsOverlap(startsAt, endsAt, block.startsAt, block.endsAt),
     );
+    const blocked = Boolean(matchedBlock) || row.status === "booked";
     return {
       id: row.id as string,
       providerId,
       date: (row.date as string) ?? formatBucharestDate(new Date(startsAt)),
       startsAt,
       endsAt,
-      status: blocked || row.status === "booked" ? ("booked" as const) : ("available" as const),
-      source: "availability" as const,
+      status: blocked ? ("booked" as const) : ("available" as const),
+      source: matchedBlock?.source ?? ("availability" as const),
+      packageId: matchedBlock?.packageId ?? null,
+      packageItemId: matchedBlock?.packageItemId ?? null,
     };
   });
 
@@ -256,7 +275,7 @@ export async function listEffectiveAvailabilityRange(
   const extraEvents: EffectiveAvailabilityRow[] = [];
 
   // Surface confirmed bookings even when no matching availability row exists yet.
-  for (const row of confirmedItems ?? []) {
+  for (const row of (confirmedItems ?? []) as Array<Record<string, unknown>>) {
     const providerId = row.provider_id as string;
     const startsAt = row.starts_at as string;
     const endsAt = row.ends_at as string;
@@ -264,18 +283,20 @@ export async function listEffectiveAvailabilityRange(
     if (coveredKeys.has(key)) continue;
     coveredKeys.add(key);
     extraEvents.push({
-      id: `booking:${providerId}:${startsAt}:${endsAt}`,
+      id: `booking:${row.id as string}`,
       providerId,
       date: formatBucharestDate(new Date(startsAt)),
       startsAt,
       endsAt,
       status: "booked",
       source: "booking",
+      packageId: (row.package_id as string | null) ?? null,
+      packageItemId: (row.id as string | null) ?? null,
     });
   }
 
   // Pending holds should also appear on the calendar (request awaiting accept).
-  for (const row of activeHolds ?? []) {
+  for (const row of (activeHolds ?? []) as Array<Record<string, unknown>>) {
     const providerId = row.provider_id as string;
     const startsAt = row.starts_at as string;
     const endsAt = row.ends_at as string;
@@ -290,6 +311,8 @@ export async function listEffectiveAvailabilityRange(
       endsAt,
       status: "booked",
       source: "hold",
+      packageId: (row.package_id as string | null) ?? null,
+      packageItemId: (row.package_item_id as string | null) ?? null,
     });
   }
 
