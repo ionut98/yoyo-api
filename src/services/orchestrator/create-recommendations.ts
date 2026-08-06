@@ -7,7 +7,9 @@ import {
 import {
   deleteProposedPackagesForParty,
   insertPackages,
+  listCommittedPackagesForParty,
 } from "../../repositories/package-requests.js";
+import { expireStaleSlotHolds } from "../../repositories/slot-holds.js";
 import type { PackageRecommendationDto } from "../../schemas/orchestrator.js";
 import { buildPackageCandidates } from "./build-packages.js";
 import { budgetCapFromParty, calculateScore } from "./score-packages.js";
@@ -22,6 +24,17 @@ export async function createRecommendationsForParty(
   if (!party) {
     throw new Error("Party not found");
   }
+
+  await expireStaleSlotHolds(supabase);
+
+  // Party already chose a package — don't regenerate competing variants.
+  const committed = await listCommittedPackagesForParty(supabase, partyId);
+  if (committed.length > 0) {
+    return committed.slice(0, 1);
+  }
+
+  // Drop leftover proposed rows (incl. partial failed requests) before matching.
+  await deleteProposedPackagesForParty(supabase, partyId);
 
   const date = resolveTargetDate(party);
   const { startsAt, endsAt } = resolveTargetSlotForDate(date);
@@ -53,8 +66,6 @@ export async function createRecommendationsForParty(
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
-
-  await deleteProposedPackagesForParty(supabase, partyId);
 
   return insertPackages(
     supabase,

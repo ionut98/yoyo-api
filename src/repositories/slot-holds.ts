@@ -2,13 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatBucharestDate } from "../lib/time-intervals.js";
 
 export async function expireStaleSlotHolds(supabase: SupabaseClient): Promise<void> {
-  const now = new Date().toISOString();
-  const { error } = await supabase
-    .from("slot_holds")
-    .update({ status: "expired", updated_at: now })
-    .eq("status", "active")
-    .lt("expires_at", now);
-
+  // SECURITY DEFINER: must clear other users' stale active holds too —
+  // the EXCLUDE constraint only checks status='active', not expires_at.
+  const { error } = await supabase.rpc("expire_stale_slot_holds");
   if (error) {
     throw new Error(`Failed to expire stale slot holds: ${error.message}`);
   }

@@ -195,28 +195,29 @@ export async function listEffectiveAvailabilityRange(
     throw new Error(`Failed to load provider availability: ${baseError.message}`);
   }
 
-  const { data: activeHolds, error: holdsError } = await supabase
-    .from("slot_holds")
-    .select("id, provider_id, starts_at, ends_at")
-    .in("provider_id", options.providerIds)
-    .lt("starts_at", options.endIso)
-    .gt("ends_at", options.startIso)
-    .eq("status", "active")
-    .gt("expires_at", new Date().toISOString())
-    .limit(5000);
+  // SECURITY DEFINER RPCs: RLS would hide other parents' holds/confirmed items
+  // and let matching propose already-blocked slots (then 409 on request).
+  const { data: activeHolds, error: holdsError } = await supabase.rpc(
+    "list_active_slot_hold_blockers",
+    {
+      p_provider_ids: options.providerIds,
+      p_start_iso: options.startIso,
+      p_end_iso: options.endIso,
+    },
+  );
 
   if (holdsError) {
     throw new Error(`Failed to load slot holds: ${holdsError.message}`);
   }
 
-  const { data: confirmedItems, error: itemsError } = await supabase
-    .from("party_package_items")
-    .select("provider_id, starts_at, ends_at")
-    .in("provider_id", options.providerIds)
-    .lt("starts_at", options.endIso)
-    .gt("ends_at", options.startIso)
-    .eq("item_status", "confirmed")
-    .limit(5000);
+  const { data: confirmedItems, error: itemsError } = await supabase.rpc(
+    "list_confirmed_package_item_blockers",
+    {
+      p_provider_ids: options.providerIds,
+      p_start_iso: options.startIso,
+      p_end_iso: options.endIso,
+    },
+  );
 
   if (itemsError) {
     throw new Error(`Failed to load confirmed package items: ${itemsError.message}`);

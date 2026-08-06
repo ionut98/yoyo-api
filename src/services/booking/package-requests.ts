@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getPackageById, updatePackageItemState, updatePackageRequestState } from "../../repositories/package-requests.js";
-import { expireStaleSlotHolds, insertSlotHolds, releaseSlotHoldsForPackage } from "../../repositories/slot-holds.js";
 import {
-  listEffectiveAvailabilityRange,
-  upsertProviderAvailability,
-} from "../../repositories/provider-enrichment.js";
+  deleteProposedPackagesForParty,
+  getPackageById,
+  updatePackageItemState,
+  updatePackageRequestState,
+} from "../../repositories/package-requests.js";
+import { expireStaleSlotHolds, insertSlotHolds, releaseSlotHoldsForPackage } from "../../repositories/slot-holds.js";
+import { listEffectiveAvailabilityRange } from "../../repositories/provider-enrichment.js";
 import { availableOnInterval } from "../orchestrator/build-packages.js";
 
 const HOLD_TTL_MS = 1000 * 60 * 60 * 2;
@@ -21,27 +23,14 @@ async function markItemBookedOnCalendar(
   supabase: SupabaseClient,
   item: { providerId: string; startsAt: string; endsAt: string },
 ): Promise<void> {
-  await upsertProviderAvailability(supabase, item.providerId, {
-    startsAt: item.startsAt,
-    endsAt: item.endsAt,
-    status: "booked",
+  // SECURITY DEFINER: parents cannot write provider_availability under RLS.
+  const { error } = await supabase.rpc("lock_provider_availability_for_booking", {
+    p_provider_id: item.providerId,
+    p_starts_at: item.startsAt,
+    p_ends_at: item.endsAt,
   });
-
-  // Flip any overlapping free rows so matching cannot reuse a wider Liber window.
-  const { error } = await supabase
-    .from("provider_availability")
-    .update({
-      status: "booked",
-      generated_at: new Date().toISOString(),
-      source_version: "provider_console_v2",
-    })
-    .eq("provider_id", item.providerId)
-    .eq("status", "available")
-    .lt("starts_at", item.endsAt)
-    .gt("ends_at", item.startsAt);
-
   if (error) {
-    throw new Error(`Failed to lock overlapping availability: ${error.message}`);
+    throw new Error(`Failed to lock provider availability: ${error.message}`);
   }
 }
 
@@ -72,6 +61,41 @@ async function assertProvidersStillAvailable(
   }
 }
 
+async function ensureSlotHolds(
+  supabase: SupabaseClient,
+  pkg: {
+    id: string;
+    items: Array<{ id: string; providerId: string; startsAt: string; endsAt: string }>;
+  },
+  expiresAt: string,
+): Promise<void> {
+  const { data: existing, error } = await supabase
+    .from("slot_holds")
+    .select("package_item_id")
+    .eq("package_id", pkg.id)
+    .eq("status", "active");
+
+  if (error) {
+    throw new Error(`Failed to load existing slot holds: ${error.message}`);
+  }
+
+  const heldItemIds = new Set((existing ?? []).map((row) => row.package_item_id as string));
+  const missing = pkg.items.filter((item) => !heldItemIds.has(item.id));
+  if (missing.length === 0) return;
+
+  await insertSlotHolds(
+    supabase,
+    missing.map((item) => ({
+      packageId: pkg.id,
+      packageItemId: item.id,
+      providerId: item.providerId,
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+      expiresAt,
+    })),
+  );
+}
+
 export async function requestPackageBooking(
   supabase: SupabaseClient,
   packageId: string,
@@ -81,36 +105,36 @@ export async function requestPackageBooking(
   if (!pkg) {
     throw new Error("Package not found");
   }
+
+  // Already committed for this party — return as-is (idempotent).
   if (pkg.status !== "proposed") {
     return pkg;
   }
 
-  await assertProvidersStillAvailable(
-    supabase,
-    pkg.items.map((item) => ({
-      providerId: item.providerId,
-      startsAt: item.startsAt,
-      endsAt: item.endsAt,
-    })),
-  );
+  // Fresh request: verify availability. Resume after partial failure skips assert
+  // for items already held/confirmed on this package.
+  const needsAvailabilityCheck = pkg.items.every((item) => item.itemStatus === "proposed");
+  if (needsAvailabilityCheck) {
+    await assertProvidersStillAvailable(
+      supabase,
+      pkg.items.map((item) => ({
+        providerId: item.providerId,
+        startsAt: item.startsAt,
+        endsAt: item.endsAt,
+      })),
+    );
+  }
 
   const expiresAt = new Date(Date.now() + HOLD_TTL_MS).toISOString();
-
-  await insertSlotHolds(
-    supabase,
-    pkg.items.map((item) => ({
-      packageId: pkg.id,
-      packageItemId: item.id,
-      providerId: item.providerId,
-      startsAt: item.startsAt,
-      endsAt: item.endsAt,
-      expiresAt,
-    })),
-  );
+  await ensureSlotHolds(supabase, pkg, expiresAt);
 
   for (const item of pkg.items) {
+    if (item.itemStatus === "declined") continue;
+
     const nextStatus = item.bookingMode === "instant" ? "confirmed" : "held";
-    await updatePackageItemState(supabase, item.id, nextStatus);
+    if (item.itemStatus !== nextStatus) {
+      await updatePackageItemState(supabase, item.id, nextStatus);
+    }
     if (nextStatus === "confirmed") {
       await markItemBookedOnCalendar(supabase, {
         providerId: item.providerId,
@@ -120,14 +144,26 @@ export async function requestPackageBooking(
     }
   }
 
+  const refreshed = await getPackageById(supabase, packageId);
+  if (!refreshed) {
+    throw new Error("Package not found after request");
+  }
+
   const nextStatus =
-    pkg.items.every((item) => item.bookingMode === "instant") ? "confirmed" : "requested";
+    refreshed.items.every((item) => item.itemStatus === "confirmed")
+      ? "confirmed"
+      : refreshed.items.some((item) => item.itemStatus === "confirmed")
+        ? "partially_confirmed"
+        : "requested";
 
   await updatePackageRequestState(supabase, packageId, {
     status: nextStatus,
     requestedAt: new Date().toISOString(),
     expiresAt,
   });
+
+  // One choice per party/slot: drop the other proposed variants.
+  await deleteProposedPackagesForParty(supabase, refreshed.partyId);
 
   return getPackageById(supabase, packageId);
 }

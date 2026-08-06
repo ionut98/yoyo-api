@@ -134,6 +134,24 @@ export async function deleteProposedPackagesForParty(
   }
 }
 
+export async function listCommittedPackagesForParty(
+  supabase: SupabaseClient,
+  partyId: string,
+): Promise<PackageRecommendationDto[]> {
+  const { data, error } = await supabase
+    .from("party_packages")
+    .select(PACKAGE_SELECT)
+    .eq("party_id", partyId)
+    .neq("status", "proposed")
+    .neq("status", "cancelled")
+    .order("requested_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to list committed packages: ${error.message}`);
+  }
+  return (data ?? []).map(mapPackageRow);
+}
+
 export async function insertPackages(
   supabase: SupabaseClient,
   rows: PackageInsert[],
