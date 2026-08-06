@@ -19,7 +19,11 @@ import {
   upsertProviderAvailability,
   updateProviderProfile,
 } from "../repositories/provider-enrichment.js";
-import { providerRespondToItem } from "../services/booking/package-requests.js";
+import {
+  expireStalePackageRequests,
+  providerDismissExpiredItem,
+  providerRespondToItem,
+} from "../services/booking/package-requests.js";
 import {
   createProviderBodySchema,
   deleteProviderAvailabilityBodySchema,
@@ -147,6 +151,7 @@ export function createProviderConsoleRoutes(env: Env) {
     const providerId = z.string().uuid().parse(c.req.param("providerId"));
     try {
       const supabase = await requireProviderMembership(env, c as any, providerId);
+      await expireStalePackageRequests(supabase);
       const data = await listProviderPackages(supabase, providerId);
       return c.json({ data });
     } catch (error) {
@@ -166,6 +171,10 @@ export function createProviderConsoleRoutes(env: Env) {
       return c.json(data);
     } catch (error) {
       console.error(error);
+      const message = error instanceof Error ? error.message : "Failed to accept request";
+      if (message === "REQUEST_EXPIRED_OR_CLOSED") {
+        return c.json({ error: message }, 409);
+      }
       return c.json({ error: "Failed to accept request" }, 500);
     }
   });
@@ -181,7 +190,30 @@ export function createProviderConsoleRoutes(env: Env) {
       return c.json(data);
     } catch (error) {
       console.error(error);
+      const message = error instanceof Error ? error.message : "Failed to decline request";
+      if (message === "REQUEST_EXPIRED_OR_CLOSED") {
+        return c.json({ error: message }, 409);
+      }
       return c.json({ error: "Failed to decline request" }, 500);
+    }
+  });
+
+  routes.post("/requests/items/:itemId/dismiss", async (c) => {
+    const parsed = providerPackageItemActionSchema.safeParse({ itemId: c.req.param("itemId") });
+    if (!parsed.success) {
+      return c.json({ error: "Invalid item id" }, 400);
+    }
+    try {
+      const supabase = getSupabaseForRequest(c, env);
+      const data = await providerDismissExpiredItem(supabase, parsed.data.itemId);
+      return c.json(data);
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Failed to dismiss request";
+      if (message === "REQUEST_NOT_EXPIRED") {
+        return c.json({ error: message }, 409);
+      }
+      return c.json({ error: "Failed to dismiss request" }, 500);
     }
   });
 

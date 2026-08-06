@@ -347,7 +347,7 @@ export async function updatePackageItemState(
   }
 }
 
-const PROVIDER_INBOX_ITEM_STATUSES = new Set(["held", "confirmed", "declined"]);
+const PROVIDER_INBOX_ITEM_STATUSES = new Set(["held", "confirmed", "declined", "expired"]);
 
 export async function listProviderPackages(
   supabase: SupabaseClient,
