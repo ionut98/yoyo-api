@@ -35,6 +35,7 @@ export type EffectiveAvailabilityRow = {
   startsAt: string;
   endsAt: string;
   status: "available" | "booked";
+  source?: "availability" | "booking" | "hold";
 };
 
 function normalizeCategory(value: string): ProviderCategory | null {
@@ -227,7 +228,7 @@ export async function listEffectiveAvailabilityRange(
     endsAt: row.ends_at as string,
   }));
 
-  return (baseRows ?? []).map((row) => {
+  const availabilityEvents: EffectiveAvailabilityRow[] = (baseRows ?? []).map((row) => {
     const startsAt = row.starts_at as string;
     const endsAt = row.ends_at as string;
     const providerId = row.provider_id as string;
@@ -243,8 +244,34 @@ export async function listEffectiveAvailabilityRange(
       startsAt,
       endsAt,
       status: blocked || row.status === "booked" ? ("booked" as const) : ("available" as const),
+      source: "availability" as const,
     };
   });
+
+  const coveredKeys = new Set(
+    availabilityEvents.map((row) => `${row.providerId}|${row.startsAt}|${row.endsAt}`),
+  );
+
+  // Surface confirmed bookings even when no matching availability row exists yet.
+  const bookingEvents: EffectiveAvailabilityRow[] = [];
+  for (const row of confirmedItems ?? []) {
+    const providerId = row.provider_id as string;
+    const startsAt = row.starts_at as string;
+    const endsAt = row.ends_at as string;
+    const key = `${providerId}|${startsAt}|${endsAt}`;
+    if (coveredKeys.has(key)) continue;
+    bookingEvents.push({
+      id: `booking:${providerId}:${startsAt}:${endsAt}`,
+      providerId,
+      date: formatBucharestDate(new Date(startsAt)),
+      startsAt,
+      endsAt,
+      status: "booked",
+      source: "booking",
+    });
+  }
+
+  return [...availabilityEvents, ...bookingEvents];
 }
 
 export async function getProviderProfileForMember(

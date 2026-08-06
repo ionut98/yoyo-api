@@ -211,7 +211,7 @@ export function createProviderConsoleRoutes(env: Env) {
           startsAt: row.startsAt,
           endsAt: row.endsAt,
           status: row.status,
-          source: "availability" as const,
+          source: row.source ?? ("availability" as const),
         })),
       });
     } catch (error) {

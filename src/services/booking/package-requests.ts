@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getPackageById, updatePackageItemState, updatePackageRequestState } from "../../repositories/package-requests.js";
 import { expireStaleSlotHolds, insertSlotHolds, releaseSlotHoldsForPackage } from "../../repositories/slot-holds.js";
+import { upsertProviderAvailability } from "../../repositories/provider-enrichment.js";
 
 const HOLD_TTL_MS = 1000 * 60 * 60 * 2;
 
@@ -10,6 +11,17 @@ function derivePackageStatus(itemStates: string[]): "requested" | "partially_con
   if (itemStates.some((state) => state === "confirmed")) return "partially_confirmed";
   if (itemStates.every((state) => state === "cancelled")) return "cancelled";
   return "requested";
+}
+
+async function markItemBookedOnCalendar(
+  supabase: SupabaseClient,
+  item: { providerId: string; startsAt: string; endsAt: string },
+): Promise<void> {
+  await upsertProviderAvailability(supabase, item.providerId, {
+    startsAt: item.startsAt,
+    endsAt: item.endsAt,
+    status: "booked",
+  });
 }
 
 export async function requestPackageBooking(
@@ -40,11 +52,15 @@ export async function requestPackageBooking(
   );
 
   for (const item of pkg.items) {
-    await updatePackageItemState(
-      supabase,
-      item.id,
-      item.bookingMode === "instant" ? "confirmed" : "held",
-    );
+    const nextStatus = item.bookingMode === "instant" ? "confirmed" : "held";
+    await updatePackageItemState(supabase, item.id, nextStatus);
+    if (nextStatus === "confirmed") {
+      await markItemBookedOnCalendar(supabase, {
+        providerId: item.providerId,
+        startsAt: item.startsAt,
+        endsAt: item.endsAt,
+      });
+    }
   }
 
   const nextStatus =
@@ -73,20 +89,37 @@ export async function providerRespondToItem(
   itemId: string,
   action: "accept" | "decline",
 ) {
+  const { data: itemRow, error: itemError } = await supabase
+    .from("party_package_items")
+    .select("id, package_id, provider_id, starts_at, ends_at, item_status")
+    .eq("id", itemId)
+    .single();
+
+  if (itemError || !itemRow) {
+    throw new Error(`Package item not found: ${itemError?.message ?? itemId}`);
+  }
+
   await updatePackageItemState(supabase, itemId, action === "accept" ? "confirmed" : "declined");
+
+  if (action === "accept") {
+    await markItemBookedOnCalendar(supabase, {
+      providerId: itemRow.provider_id as string,
+      startsAt: itemRow.starts_at as string,
+      endsAt: itemRow.ends_at as string,
+    });
+  }
+
+  const packageId = itemRow.package_id as string;
   const { data, error } = await supabase
     .from("party_package_items")
     .select("package_id, item_status")
-    .eq("package_id", (
-      await supabase.from("party_package_items").select("package_id").eq("id", itemId).single()
-    ).data?.package_id)
+    .eq("package_id", packageId)
     .order("created_at", { ascending: true });
 
   if (error || !data || data.length === 0) {
     throw new Error(`Failed to recompute package state: ${error?.message ?? "missing package items"}`);
   }
 
-  const packageId = data[0]?.package_id as string;
   const nextStatus = derivePackageStatus(data.map((row) => row.item_status as string));
   await updatePackageRequestState(supabase, packageId, { status: nextStatus });
   if (action === "decline") {
