@@ -52,6 +52,17 @@ export const partySchema = z.object({
   themeCustom: z.string().nullable(),
   activities: z.array(z.string()),
   status: z.string(),
+  bookingStatus: z
+    .enum([
+      "none",
+      "requested",
+      "partially_confirmed",
+      "confirmed",
+      "failed",
+      "expired",
+      "cancelled",
+    ])
+    .default("none"),
   city: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),

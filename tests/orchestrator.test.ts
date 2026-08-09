@@ -7,9 +7,10 @@ import {
 import { budgetCapFromParty, calculateScore } from "../src/services/orchestrator/score-packages.js";
 import { sectorFitScore } from "../src/services/orchestrator/sector-fit.js";
 import type { ProviderProfileRow } from "../src/repositories/provider-enrichment.js";
+import type { PartyDto } from "../src/schemas/parties.js";
 import { bucharestDateTimeIso } from "../src/lib/time-intervals.js";
 
-const party = {
+const party: PartyDto = {
   id: "10000000-0000-4000-8000-000000000001",
   ageRange: "6-8",
   budget: "3500",
@@ -21,6 +22,7 @@ const party = {
   themeCustom: null,
   activities: ["balloon-modelling"],
   status: "intake",
+  bookingStatus: "none",
   city: "București",
   createdAt: "2026-07-28T10:00:00.000Z",
   updatedAt: "2026-07-28T10:00:00.000Z",

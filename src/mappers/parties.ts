@@ -17,7 +17,10 @@ type DbPartyRow = {
   updated_at: string;
 };
 
-export function toPartyDto(row: DbPartyRow): PartyDto {
+export function toPartyDto(
+  row: DbPartyRow,
+  bookingStatus: PartyDto["bookingStatus"] = "none",
+): PartyDto {
   return {
     id: row.id,
     ageRange: row.age_range,
@@ -30,6 +33,7 @@ export function toPartyDto(row: DbPartyRow): PartyDto {
     themeCustom: row.theme_custom,
     activities: row.activities ?? [],
     status: row.status,
+    bookingStatus,
     city: row.city,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

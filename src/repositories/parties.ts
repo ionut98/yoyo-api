@@ -7,6 +7,59 @@ const PARTY_SELECT = `
   sector, theme_id, theme_custom, activities, status, city, created_at, updated_at
 `;
 
+const BOOKING_STATUS_PRIORITY: Record<string, number> = {
+  confirmed: 60,
+  partially_confirmed: 50,
+  requested: 40,
+  failed: 30,
+  expired: 20,
+  cancelled: 10,
+};
+
+function normalizeBookingStatus(value: string | null | undefined): PartyDto["bookingStatus"] {
+  if (
+    value === "requested" ||
+    value === "partially_confirmed" ||
+    value === "confirmed" ||
+    value === "failed" ||
+    value === "expired" ||
+    value === "cancelled"
+  ) {
+    return value;
+  }
+  return "none";
+}
+
+async function bookingStatusByPartyId(
+  supabase: SupabaseClient,
+  partyIds: string[],
+): Promise<Map<string, PartyDto["bookingStatus"]>> {
+  const result = new Map<string, PartyDto["bookingStatus"]>();
+  if (partyIds.length === 0) return result;
+
+  const { data, error } = await supabase
+    .from("party_packages")
+    .select("party_id, status, requested_at")
+    .in("party_id", partyIds)
+    .neq("status", "proposed")
+    .order("requested_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to load party booking status: ${error.message}`);
+  }
+
+  for (const row of data ?? []) {
+    const partyId = row.party_id as string;
+    const next = normalizeBookingStatus(row.status as string);
+    const current = result.get(partyId) ?? "none";
+    if ((BOOKING_STATUS_PRIORITY[next] ?? 0) >= (BOOKING_STATUS_PRIORITY[current] ?? 0)) {
+      result.set(partyId, next);
+    }
+  }
+
+  return result;
+}
+
 export async function listPartiesForUser(
   supabase: SupabaseClient,
   userId: string,
@@ -21,8 +74,16 @@ export async function listPartiesForUser(
     throw new Error(`Failed to list parties: ${error.message}`);
   }
 
+  const rows = data ?? [];
+  const bookingByParty = await bookingStatusByPartyId(
+    supabase,
+    rows.map((row) => row.id as string),
+  );
+
   return {
-    data: (data ?? []).map(toPartyDto),
+    data: rows.map((row) =>
+      toPartyDto(row, bookingByParty.get(row.id as string) ?? "none"),
+    ),
   };
 }
 
