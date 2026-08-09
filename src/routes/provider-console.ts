@@ -340,16 +340,30 @@ export function createProviderConsoleRoutes(env: Env) {
 
   routes.get("/calendar/:providerId", async (c) => {
     const providerId = z.string().uuid().parse(c.req.param("providerId"));
+    const fromParam = c.req.query("from");
+    const toParam = c.req.query("to");
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     try {
       const supabase = await requireProviderMembership(env, c as any, providerId);
-      const [year, monthNumber] = month.split("-").map(Number);
-      if (!year || !monthNumber) {
-        return c.json({ error: "Invalid month" }, 400);
-      }
 
-      const startIso = new Date(Date.UTC(year, monthNumber - 1, 1)).toISOString();
-      const endIso = new Date(Date.UTC(year, monthNumber, 1)).toISOString();
+      let startIso: string;
+      let endIso: string;
+      if (fromParam && toParam) {
+        const startMs = Date.parse(fromParam);
+        const endMs = Date.parse(toParam);
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+          return c.json({ error: "Invalid from/to range" }, 400);
+        }
+        startIso = new Date(startMs).toISOString();
+        endIso = new Date(endMs).toISOString();
+      } else {
+        const [year, monthNumber] = month.split("-").map(Number);
+        if (!year || !monthNumber) {
+          return c.json({ error: "Invalid month" }, 400);
+        }
+        startIso = new Date(Date.UTC(year, monthNumber - 1, 1)).toISOString();
+        endIso = new Date(Date.UTC(year, monthNumber, 1)).toISOString();
+      }
 
       const rows = await listEffectiveAvailabilityRange(supabase, {
         providerIds: [providerId],
