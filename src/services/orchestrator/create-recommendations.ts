@@ -8,8 +8,12 @@ import {
   deleteProposedPackagesForParty,
   insertPackages,
   listCommittedPackagesForParty,
+  listTerminalPackagesForParty,
 } from "../../repositories/package-requests.js";
-import { expireStaleSlotHolds } from "../../repositories/slot-holds.js";
+import {
+  cancelTerminalPackagesForParty,
+  expireStalePackageRequests,
+} from "../booking/package-requests.js";
 import type { PackageRecommendationDto } from "../../schemas/orchestrator.js";
 import { buildPackageCandidates } from "./build-packages.js";
 import { budgetCapFromParty, calculateScore } from "./score-packages.js";
@@ -19,18 +23,31 @@ export async function createRecommendationsForParty(
   supabase: SupabaseClient,
   partyId: string,
   userId: string,
+  options: { regenerate?: boolean } = {},
 ): Promise<PackageRecommendationDto[]> {
   const party = await getPartyById(supabase, userId, partyId);
   if (!party) {
     throw new Error("Party not found");
   }
 
-  await expireStaleSlotHolds(supabase);
+  await expireStalePackageRequests(supabase);
 
-  // Party already chose a package — don't regenerate competing variants.
+  if (options.regenerate) {
+    await cancelTerminalPackagesForParty(supabase, partyId, userId);
+  }
+
+  // Party already has an active booking — don't regenerate competing variants.
   const committed = await listCommittedPackagesForParty(supabase, partyId);
   if (committed.length > 0) {
     return committed.slice(0, 1);
+  }
+
+  // Surface expired/failed near-bookings until parent regenerates or dismisses.
+  if (!options.regenerate) {
+    const terminal = await listTerminalPackagesForParty(supabase, partyId);
+    if (terminal.length > 0) {
+      return terminal.slice(0, 1);
+    }
   }
 
   // Drop leftover proposed rows (incl. partial failed requests) before matching.

@@ -11,6 +11,9 @@ import { availableOnInterval } from "../orchestrator/build-packages.js";
 
 const HOLD_TTL_MS = 1000 * 60 * 60 * 2;
 
+const ACTIVE_PACKAGE_STATUSES = ["requested", "partially_confirmed", "confirmed"] as const;
+const TERMINAL_PACKAGE_STATUSES = ["expired", "failed"] as const;
+
 function derivePackageStatus(
   itemStates: string[],
 ): "requested" | "partially_confirmed" | "confirmed" | "failed" | "expired" | "cancelled" {
@@ -38,7 +41,21 @@ async function recomputePackageStatus(supabase: SupabaseClient, packageId: strin
   return nextStatus;
 }
 
-/** Mark held items past package expires_at as expired and free slot holds. */
+async function unlockItemFromCalendar(
+  supabase: SupabaseClient,
+  item: { providerId: string; startsAt: string; endsAt: string },
+): Promise<void> {
+  const { error } = await supabase.rpc("unlock_provider_availability_for_booking", {
+    p_provider_id: item.providerId,
+    p_starts_at: item.startsAt,
+    p_ends_at: item.endsAt,
+  });
+  if (error) {
+    throw new Error(`Failed to unlock provider availability: ${error.message}`);
+  }
+}
+
+/** Mark incomplete packages past expires_at as expired and free calendar locks (variant 1). */
 export async function expireStalePackageRequests(supabase: SupabaseClient): Promise<void> {
   await expireStaleSlotHolds(supabase);
 
@@ -57,30 +74,32 @@ export async function expireStalePackageRequests(supabase: SupabaseClient): Prom
     const packageId = row.id as string;
     const { data: items, error: itemsError } = await supabase
       .from("party_package_items")
-      .select("id, item_status")
+      .select("id, provider_id, starts_at, ends_at, item_status")
       .eq("package_id", packageId);
 
     if (itemsError) {
       throw new Error(`Failed to load stale package items: ${itemsError.message}`);
     }
 
-    const heldIds = (items ?? [])
-      .filter((item) => item.item_status === "held")
-      .map((item) => item.id as string);
-
-    if (heldIds.length === 0) continue;
-
-    const { error: updateError } = await supabase
-      .from("party_package_items")
-      .update({ item_status: "expired", updated_at: nowIso })
-      .in("id", heldIds);
-
-    if (updateError) {
-      throw new Error(`Failed to expire package items: ${updateError.message}`);
+    for (const item of items ?? []) {
+      const status = item.item_status as string;
+      if (status === "confirmed") {
+        await unlockItemFromCalendar(supabase, {
+          providerId: item.provider_id as string,
+          startsAt: item.starts_at as string,
+          endsAt: item.ends_at as string,
+        });
+        await updatePackageItemState(supabase, item.id as string, "expired");
+      } else if (status === "held") {
+        await updatePackageItemState(supabase, item.id as string, "expired");
+      }
     }
 
-    await recomputePackageStatus(supabase, packageId);
     await releaseSlotHoldsForPackage(supabase, packageId, "expired");
+    await updatePackageRequestState(supabase, packageId, {
+      status: "expired",
+      expiresAt: nowIso,
+    });
   }
 }
 
@@ -233,13 +252,83 @@ export async function requestPackageBooking(
   return getPackageById(supabase, packageId);
 }
 
-export async function cancelPackageBooking(supabase: SupabaseClient, packageId: string) {
+export async function cancelPackageBooking(
+  supabase: SupabaseClient,
+  packageId: string,
+  userId: string,
+) {
+  const { data: pkgRow, error: pkgError } = await supabase
+    .from("party_packages")
+    .select("id, user_id, status")
+    .eq("id", packageId)
+    .maybeSingle();
+
+  if (pkgError) {
+    throw new Error(`Failed to load package for cancel: ${pkgError.message}`);
+  }
+  if (!pkgRow) {
+    throw new Error("Package not found");
+  }
+  if ((pkgRow.user_id as string) !== userId) {
+    throw new Error("FORBIDDEN");
+  }
+  if ((pkgRow.status as string) === "confirmed") {
+    throw new Error("Cannot cancel a fully confirmed package");
+  }
+
+  const { data: items, error: itemsError } = await supabase
+    .from("party_package_items")
+    .select("id, provider_id, starts_at, ends_at, item_status")
+    .eq("package_id", packageId);
+
+  if (itemsError) {
+    throw new Error(`Failed to load package items for cancel: ${itemsError.message}`);
+  }
+
+  const nowIso = new Date().toISOString();
+
+  for (const item of items ?? []) {
+    const status = item.item_status as string;
+    if (status === "confirmed") {
+      await unlockItemFromCalendar(supabase, {
+        providerId: item.provider_id as string,
+        startsAt: item.starts_at as string,
+        endsAt: item.ends_at as string,
+      });
+    }
+    if (status === "proposed" || status === "held" || status === "confirmed" || status === "expired") {
+      await updatePackageItemState(supabase, item.id as string, "cancelled");
+    }
+  }
+
   await releaseSlotHoldsForPackage(supabase, packageId, "released");
   await updatePackageRequestState(supabase, packageId, {
     status: "cancelled",
-    expiresAt: new Date().toISOString(),
+    expiresAt: nowIso,
   });
   return getPackageById(supabase, packageId);
+}
+
+/** Cancel expired/failed near-bookings so recommendations can rebuild. */
+export async function cancelTerminalPackagesForParty(
+  supabase: SupabaseClient,
+  partyId: string,
+  userId: string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("party_packages")
+    .select("id")
+    .eq("party_id", partyId)
+    .eq("user_id", userId)
+    .in("status", [...TERMINAL_PACKAGE_STATUSES]);
+
+  if (error) {
+    throw new Error(`Failed to list terminal packages: ${error.message}`);
+  }
+
+  for (const row of data ?? []) {
+    await cancelPackageBooking(supabase, row.id as string, userId);
+  }
 }
 
 export async function providerRespondToItem(
@@ -321,3 +410,5 @@ export async function providerDismissExpiredItem(supabase: SupabaseClient, itemI
   await recomputePackageStatus(supabase, itemRow.package_id as string);
   return getPackageById(supabase, itemRow.package_id as string);
 }
+
+export { ACTIVE_PACKAGE_STATUSES, TERMINAL_PACKAGE_STATUSES };

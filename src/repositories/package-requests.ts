@@ -210,6 +210,7 @@ export async function deleteProposedPackagesForParty(
   }
 }
 
+/** Active bookings that block regenerating recommendations. */
 export async function listCommittedPackagesForParty(
   supabase: SupabaseClient,
   partyId: string,
@@ -218,12 +219,29 @@ export async function listCommittedPackagesForParty(
     .from("party_packages")
     .select(PACKAGE_SELECT)
     .eq("party_id", partyId)
-    .neq("status", "proposed")
-    .neq("status", "cancelled")
+    .in("status", ["requested", "partially_confirmed", "confirmed"])
     .order("requested_at", { ascending: false });
 
   if (error) {
     throw new Error(`Failed to list committed packages: ${error.message}`);
+  }
+  return (data ?? []).map(mapPackageRow);
+}
+
+/** Expired/failed near-bookings shown until parent dismisses or regenerates. */
+export async function listTerminalPackagesForParty(
+  supabase: SupabaseClient,
+  partyId: string,
+): Promise<PackageRecommendationDto[]> {
+  const { data, error } = await supabase
+    .from("party_packages")
+    .select(PACKAGE_SELECT)
+    .eq("party_id", partyId)
+    .in("status", ["expired", "failed"])
+    .order("requested_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to list terminal packages: ${error.message}`);
   }
   return (data ?? []).map(mapPackageRow);
 }

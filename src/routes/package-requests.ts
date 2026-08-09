@@ -55,11 +55,17 @@ export function createPackageRequestRoutes(env: Env) {
     }
 
     try {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
       const supabase = getSupabaseForRequest(c, env);
-      const pkg = await cancelPackageBooking(supabase, parsed.data);
+      const pkg = await cancelPackageBooking(supabase, parsed.data, user.id);
       return c.json(pkg);
     } catch (error) {
       console.error(error);
+      const message = error instanceof Error ? error.message : "Failed to cancel package";
+      if (message === "FORBIDDEN") return c.json({ error: message }, 403);
+      if (message === "Package not found") return c.json({ error: message }, 404);
+      if (message.includes("fully confirmed")) return c.json({ error: message }, 409);
       return c.json({ error: "Failed to cancel package" }, 500);
     }
   });

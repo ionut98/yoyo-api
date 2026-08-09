@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { toPartyDto } from "../mappers/parties.js";
 import type { CreatePartyBody, ListPartiesResponse, PartyDto } from "../schemas/parties.js";
+import { expireStalePackageRequests } from "../services/booking/package-requests.js";
 
 const PARTY_SELECT = `
   id, age_range, budget, guest_count, date_preference, preferred_date,
@@ -13,7 +14,6 @@ const BOOKING_STATUS_PRIORITY: Record<string, number> = {
   requested: 40,
   failed: 30,
   expired: 20,
-  cancelled: 10,
 };
 
 function normalizeBookingStatus(value: string | null | undefined): PartyDto["bookingStatus"] {
@@ -42,6 +42,7 @@ async function bookingStatusByPartyId(
     .select("party_id, status, requested_at")
     .in("party_id", partyIds)
     .neq("status", "proposed")
+    .neq("status", "cancelled")
     .order("requested_at", { ascending: false });
 
   if (error) {
@@ -51,6 +52,7 @@ async function bookingStatusByPartyId(
   for (const row of data ?? []) {
     const partyId = row.party_id as string;
     const next = normalizeBookingStatus(row.status as string);
+    if (next === "none" || next === "cancelled") continue;
     const current = result.get(partyId) ?? "none";
     if ((BOOKING_STATUS_PRIORITY[next] ?? 0) >= (BOOKING_STATUS_PRIORITY[current] ?? 0)) {
       result.set(partyId, next);
@@ -64,6 +66,8 @@ export async function listPartiesForUser(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<ListPartiesResponse> {
+  await expireStalePackageRequests(supabase);
+
   const { data, error } = await supabase
     .from("parties")
     .select(PARTY_SELECT)

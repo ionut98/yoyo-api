@@ -8,6 +8,13 @@ import {
 } from "../middleware/auth.js";
 import { createRecommendationsForParty } from "../services/orchestrator/create-recommendations.js";
 
+const recommendationsBodySchema = z
+  .object({
+    regenerate: z.boolean().optional().default(false),
+  })
+  .optional()
+  .default({ regenerate: false });
+
 export function createRecommendationRoutes(env: Env) {
   const routes = new Hono<{ Variables: AuthVariables }>();
   routes.use("*", createRequireAuth(env));
@@ -21,8 +28,11 @@ export function createRecommendationRoutes(env: Env) {
     try {
       const user = c.get("user");
       if (!user) return c.json({ error: "Unauthorized" }, 401);
+      const body = recommendationsBodySchema.parse(await c.req.json().catch(() => ({})));
       const supabase = getSupabaseForRequest(c, env);
-      const data = await createRecommendationsForParty(supabase, parsed.data, user.id);
+      const data = await createRecommendationsForParty(supabase, parsed.data, user.id, {
+        regenerate: body.regenerate,
+      });
       return c.json({ data });
     } catch (error) {
       console.error(error);
