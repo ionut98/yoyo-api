@@ -35,9 +35,11 @@ export type EffectiveAvailabilityRow = {
   startsAt: string;
   endsAt: string;
   status: "available" | "booked";
-  source?: "availability" | "booking" | "hold";
+  source?: "availability" | "booking" | "hold" | "manual";
   packageId?: string | null;
   packageItemId?: string | null;
+  reservationId?: string | null;
+  title?: string | null;
 };
 
 function normalizeCategory(value: string): ProviderCategory | null {
@@ -225,12 +227,27 @@ export async function listEffectiveAvailabilityRange(
     throw new Error(`Failed to load confirmed package items: ${itemsError.message}`);
   }
 
+  const { data: manualReservations, error: manualError } = await supabase.rpc(
+    "list_confirmed_manual_reservation_blockers",
+    {
+      p_provider_ids: options.providerIds,
+      p_start_iso: options.startIso,
+      p_end_iso: options.endIso,
+    },
+  );
+
+  if (manualError) {
+    throw new Error(`Failed to load manual reservations: ${manualError.message}`);
+  }
+
   const holdBlockers = ((activeHolds ?? []) as Array<Record<string, unknown>>).map((row) => ({
     providerId: row.provider_id as string,
     startsAt: row.starts_at as string,
     endsAt: row.ends_at as string,
     packageId: (row.package_id as string | null) ?? null,
     packageItemId: (row.package_item_id as string | null) ?? null,
+    reservationId: null as string | null,
+    title: null as string | null,
     source: "hold" as const,
     id: `hold:${row.id as string}`,
   }));
@@ -241,11 +258,27 @@ export async function listEffectiveAvailabilityRange(
     endsAt: row.ends_at as string,
     packageId: (row.package_id as string | null) ?? null,
     packageItemId: (row.id as string | null) ?? null,
+    reservationId: null as string | null,
+    title: null as string | null,
     source: "booking" as const,
     id: `booking:${row.id as string}`,
   }));
 
-  const blockers = [...holdBlockers, ...bookingBlockers];
+  const manualBlockers = ((manualReservations ?? []) as Array<Record<string, unknown>>).map(
+    (row) => ({
+      providerId: row.provider_id as string,
+      startsAt: row.starts_at as string,
+      endsAt: row.ends_at as string,
+      packageId: null as string | null,
+      packageItemId: null as string | null,
+      reservationId: row.id as string,
+      title: (row.parent_name as string | null) ?? "Rezervare externă",
+      source: "manual" as const,
+      id: `manual:${row.id as string}`,
+    }),
+  );
+
+  const blockers = [...holdBlockers, ...bookingBlockers, ...manualBlockers];
 
   // Availability rows keep source="availability". Never copy packageId onto them —
   // that made Liber mirrors open as "Cerere în așteptare" beside the real hold.
@@ -271,6 +304,8 @@ export async function listEffectiveAvailabilityRange(
       source: "availability" as const,
       packageId: null,
       packageItemId: null,
+      reservationId: null,
+      title: null,
     };
   });
 
@@ -284,6 +319,8 @@ export async function listEffectiveAvailabilityRange(
     source: block.source,
     packageId: block.packageId,
     packageItemId: block.packageItemId,
+    reservationId: block.reservationId,
+    title: block.title,
   }));
 
   return dedupeAvailabilityEvents([...availabilityEvents, ...bookingEvents]);
@@ -294,8 +331,9 @@ function intervalKey(providerId: string, startsAt: string, endsAt: string): stri
 }
 
 function eventRank(row: EffectiveAvailabilityRow): number {
-  // Prefer real booking/hold rows (with package link) over availability mirrors.
+  // Prefer real booking/hold/manual rows over availability mirrors.
   if (row.source === "booking") return 300;
+  if (row.source === "manual") return 250;
   if (row.source === "hold") return 200;
   if (row.status === "booked") return 100;
   return 0;
@@ -314,7 +352,7 @@ function dedupeAvailabilityEvents(rows: EffectiveAvailabilityRow[]): EffectiveAv
 
   const exact = [...byExactKey.values()];
 
-  // Drop availability booked mirrors covered by a booking/hold (exact or overlap).
+  // Drop availability booked mirrors covered by a booking/hold/manual (exact or overlap).
   return exact.filter((row) => {
     if (row.source !== "availability" || row.status !== "booked") return true;
 
@@ -322,7 +360,7 @@ function dedupeAvailabilityEvents(rows: EffectiveAvailabilityRow[]): EffectiveAv
       (other) =>
         other !== row &&
         other.providerId === row.providerId &&
-        (other.source === "booking" || other.source === "hold") &&
+        (other.source === "booking" || other.source === "hold" || other.source === "manual") &&
         intervalsOverlap(row.startsAt, row.endsAt, other.startsAt, other.endsAt),
     );
     return !coveredByBooking;

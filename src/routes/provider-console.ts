@@ -13,6 +13,13 @@ import {
 import { createManualProvider } from "../repositories/create-provider.js";
 import { listProviderPackages } from "../repositories/package-requests.js";
 import {
+  cancelProviderReservation,
+  createProviderReservation,
+  getProviderReservation,
+  listProviderReservations,
+  updateProviderReservation,
+} from "../repositories/provider-reservations.js";
+import {
   deleteProviderAvailability,
   getProviderProfileForMember,
   listEffectiveAvailabilityRange,
@@ -25,12 +32,16 @@ import {
   providerRespondToItem,
 } from "../services/booking/package-requests.js";
 import {
+  cancelProviderReservationBodySchema,
   createProviderBodySchema,
+  createProviderReservationBodySchema,
   deleteProviderAvailabilityBodySchema,
   providerPackageItemActionSchema,
   providerProfileSchema,
+  providerReservationSchema,
   updateProviderAvailabilityBodySchema,
   updateProviderProfileBodySchema,
+  updateProviderReservationBodySchema,
 } from "../schemas/orchestrator.js";
 
 async function requireProviderMembership(
@@ -217,6 +228,100 @@ export function createProviderConsoleRoutes(env: Env) {
     }
   });
 
+  routes.get("/reservations/item/:reservationId", async (c) => {
+    const reservationId = z.string().uuid().parse(c.req.param("reservationId"));
+    try {
+      const supabase = getSupabaseForRequest(c, env);
+      const row = await getProviderReservation(supabase, reservationId);
+      if (!row) return c.json({ error: "Reservation not found" }, 404);
+      await requireProviderMembership(env, c as any, row.providerId);
+      return c.json({ data: providerReservationSchema.parse(row) });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: "Failed to load reservation" }, 403);
+    }
+  });
+
+  routes.get("/reservations/:providerId", async (c) => {
+    const providerId = z.string().uuid().parse(c.req.param("providerId"));
+    try {
+      const supabase = await requireProviderMembership(env, c as any, providerId);
+      const data = await listProviderReservations(supabase, providerId);
+      return c.json({ data: data.map((row) => providerReservationSchema.parse(row)) });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: "Failed to load reservations" }, 403);
+    }
+  });
+
+  routes.post("/reservations", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const json = await c.req.json().catch(() => null);
+    const parsed = createProviderReservationBodySchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid reservation payload", details: z.treeifyError(parsed.error) }, 400);
+    }
+    try {
+      const supabase = await requireProviderMembership(env, c as any, parsed.data.providerId);
+      const { providerId, ...input } = parsed.data;
+      const data = await createProviderReservation(supabase, providerId, user.id, {
+        ...input,
+        parentEmail: input.parentEmail || null,
+      });
+      return c.json({ data: providerReservationSchema.parse(data) });
+    } catch (error) {
+      console.error(error);
+      return c.json(
+        { error: error instanceof Error ? error.message : "Failed to create reservation" },
+        500,
+      );
+    }
+  });
+
+  routes.patch("/reservations", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = updateProviderReservationBodySchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid reservation payload", details: z.treeifyError(parsed.error) }, 400);
+    }
+    try {
+      const supabase = await requireProviderMembership(env, c as any, parsed.data.providerId);
+      const { providerId, id, ...input } = parsed.data;
+      const data = await updateProviderReservation(supabase, providerId, id, {
+        ...input,
+        parentEmail: input.parentEmail || null,
+      });
+      return c.json({ data: providerReservationSchema.parse(data) });
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Failed to update reservation";
+      if (message === "RESERVATION_CANCELLED" || message === "Reservation not found") {
+        return c.json({ error: message }, 409);
+      }
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  routes.delete("/reservations", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = cancelProviderReservationBodySchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid cancel payload", details: z.treeifyError(parsed.error) }, 400);
+    }
+    try {
+      const supabase = await requireProviderMembership(env, c as any, parsed.data.providerId);
+      const data = await cancelProviderReservation(supabase, parsed.data.providerId, parsed.data.id);
+      return c.json({ data: providerReservationSchema.parse(data) });
+    } catch (error) {
+      console.error(error);
+      return c.json(
+        { error: error instanceof Error ? error.message : "Failed to cancel reservation" },
+        500,
+      );
+    }
+  });
+
   routes.get("/calendar/:providerId", async (c) => {
     const providerId = z.string().uuid().parse(c.req.param("providerId"));
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
@@ -268,7 +373,10 @@ export function createProviderConsoleRoutes(env: Env) {
           source: row.source ?? ("availability" as const),
           packageId: row.packageId ?? null,
           packageItemId: row.packageItemId ?? null,
-          title: row.packageId ? (titleByPackageId.get(row.packageId) ?? "Rezervare") : null,
+          reservationId: row.reservationId ?? null,
+          title:
+            row.title ??
+            (row.packageId ? (titleByPackageId.get(row.packageId) ?? "Rezervare") : null),
         })),
       });
     } catch (error) {

@@ -160,6 +160,54 @@ export const deleteProviderAvailabilityBodySchema = z.object({
   id: z.string().uuid(),
 });
 
+export const providerReservationSchema = z.object({
+  id: z.string().uuid(),
+  providerId: z.string().uuid(),
+  startsAt: z.string(),
+  endsAt: z.string(),
+  origin: z.literal("manual"),
+  parentName: z.string(),
+  parentPhone: z.string().nullable(),
+  parentEmail: z.string().nullable(),
+  ageRange: z.string().nullable(),
+  guestCount: z.string().nullable(),
+  budget: z.string().nullable(),
+  sector: z.string().nullable(),
+  city: z.string().nullable(),
+  themeLabel: z.string().nullable(),
+  activities: z.array(z.string()),
+  notes: z.string().nullable(),
+  status: z.enum(["confirmed", "cancelled"]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const createProviderReservationBodySchema = z.object({
+  providerId: z.string().uuid(),
+  startsAt: z.string().min(10),
+  endsAt: z.string().min(10),
+  parentName: z.string().min(1).max(120),
+  parentPhone: z.string().max(40).nullable().optional(),
+  parentEmail: z.union([z.string().email(), z.literal(""), z.null()]).optional(),
+  ageRange: z.string().max(40).nullable().optional(),
+  guestCount: z.string().max(40).nullable().optional(),
+  budget: z.string().max(40).nullable().optional(),
+  sector: z.string().max(40).nullable().optional(),
+  city: z.string().max(80).nullable().optional(),
+  themeLabel: z.string().max(120).nullable().optional(),
+  activities: z.array(z.string()).optional(),
+  notes: z.string().max(2000).nullable().optional(),
+});
+
+export const updateProviderReservationBodySchema = createProviderReservationBodySchema.extend({
+  id: z.string().uuid(),
+});
+
+export const cancelProviderReservationBodySchema = z.object({
+  providerId: z.string().uuid(),
+  id: z.string().uuid(),
+});
+
 export const updateProviderProfileBodySchema = z.object({
   providerId: z.string().uuid(),
   bookingMode: bookingModeSchema,
