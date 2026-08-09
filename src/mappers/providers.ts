@@ -14,12 +14,15 @@ type DbProviderPhotoRow = {
   public_url: string | null;
   width_px: number | null;
   height_px: number | null;
+  sort_order?: number | null;
+  is_cover?: boolean | null;
 };
 
 type DbProviderRow = {
   id: string;
   place_id: string;
   name: string;
+  description?: string | null;
   categories: string[];
   address: string | null;
   phone: string | null;
@@ -53,9 +56,18 @@ function toCategories(raw: string[]): ProviderCategory[] {
   return raw.filter((c): c is ProviderCategory => VALID_CATEGORIES.has(c));
 }
 
+function sortedPhotos(photos: DbProviderPhotoRow[] | null | undefined): DbProviderPhotoRow[] {
+  return [...(photos ?? [])].sort((a, b) => {
+    const coverDelta = Number(Boolean(b.is_cover)) - Number(Boolean(a.is_cover));
+    if (coverDelta !== 0) return coverDelta;
+    return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+  });
+}
+
 function firstPhotoUrl(photos: DbProviderPhotoRow[] | null | undefined): string | null {
-  const url = photos?.find((photo) => Boolean(photo.public_url))?.public_url;
-  return url ?? null;
+  const ordered = sortedPhotos(photos);
+  const cover = ordered.find((photo) => photo.is_cover && photo.public_url) ?? ordered[0];
+  return cover?.public_url ?? null;
 }
 
 export function toProviderDto(row: DbProviderRow): ProviderDto {
@@ -63,6 +75,7 @@ export function toProviderDto(row: DbProviderRow): ProviderDto {
     id: row.id,
     placeId: row.place_id,
     name: row.name,
+    description: row.description ?? null,
     categories: toCategories(row.categories),
     address: row.address,
     phone: row.phone,
@@ -78,11 +91,13 @@ export function toProviderDto(row: DbProviderRow): ProviderDto {
 }
 
 export function toProviderDetailDto(row: DbProviderDetailRow): ProviderDetailDto {
-  const photos = (row.provider_photos ?? []).map((photo) => ({
+  const photos = sortedPhotos(row.provider_photos).map((photo) => ({
     id: photo.id,
     publicUrl: photo.public_url,
     widthPx: photo.width_px,
     heightPx: photo.height_px,
+    sortOrder: photo.sort_order ?? 0,
+    isCover: Boolean(photo.is_cover),
   }));
 
   return {

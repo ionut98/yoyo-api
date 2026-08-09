@@ -112,9 +112,12 @@ export const providerProfileSchema = z.object({
   providerName: z.string(),
   placeId: z.string(),
   isManual: z.boolean(),
+  description: z.string().nullable().default(null),
   address: z.string().nullable(),
   phone: z.string().nullable(),
   website: z.string().nullable(),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
   categories: z.array(providerCategorySchema),
   homeSector: z.string().nullable(),
   rating: z.number().nullable(),
@@ -128,6 +131,18 @@ export const providerProfileSchema = z.object({
   serviceAreaSectors: z.array(z.string()),
   priceMin: z.number().int().nonnegative(),
   priceMax: z.number().int().nonnegative(),
+  photos: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        publicUrl: z.string().nullable(),
+        widthPx: z.number().nullable(),
+        heightPx: z.number().nullable(),
+        sortOrder: z.number().int().nonnegative(),
+        isCover: z.boolean(),
+      }),
+    )
+    .default([]),
 });
 
 export const providerRequestsResponseSchema = z.object({
@@ -174,6 +189,9 @@ export const providerReservationSchema = z.object({
   budget: z.string().nullable(),
   sector: z.string().nullable(),
   city: z.string().nullable(),
+  address: z.string().nullable(),
+  lat: z.number().nullable(),
+  lng: z.number().nullable(),
   themeLabel: z.string().nullable(),
   activities: z.array(z.string()),
   notes: z.string().nullable(),
@@ -194,6 +212,9 @@ export const createProviderReservationBodySchema = z.object({
   budget: z.string().max(40).nullable().optional(),
   sector: z.string().max(40).nullable().optional(),
   city: z.string().max(80).nullable().optional(),
+  address: z.string().min(3).max(300),
+  lat: z.number().nullable().optional(),
+  lng: z.number().nullable().optional(),
   themeLabel: z.string().max(120).nullable().optional(),
   activities: z.array(z.string()).optional(),
   notes: z.string().max(2000).nullable().optional(),
@@ -219,11 +240,13 @@ export const updateProviderProfileBodySchema = z.object({
   serviceAreaSectors: z.array(z.string()).default([]),
   priceMin: z.number().int().nonnegative(),
   priceMax: z.number().int().nonnegative(),
-  // Editable only for manual providers
   providerName: z.string().min(2).max(120).optional(),
+  description: z.string().max(4000).nullable().optional(),
   address: z.string().max(300).nullable().optional(),
   phone: z.string().max(40).nullable().optional(),
   website: z.string().max(300).nullable().optional(),
+  lat: z.number().nullable().optional(),
+  lng: z.number().nullable().optional(),
 });
 
 export const createProviderBodySchema = z.object({
@@ -231,6 +254,7 @@ export const createProviderBodySchema = z.object({
   category: providerCategorySchema,
   city: z.string().min(2).default("București"),
   address: z.string().min(3).max(300),
+  description: z.string().max(4000).nullable().optional(),
   phone: z.string().max(40).nullable().optional(),
   website: z.string().max(300).nullable().optional(),
   bookingMode: bookingModeSchema.default("request"),
@@ -243,6 +267,19 @@ export const createProviderBodySchema = z.object({
   priceMin: z.number().int().nonnegative(),
   priceMax: z.number().int().nonnegative(),
   homeSector: z.string().nullable().optional(),
+  lat: z.number().nullable().optional(),
+  lng: z.number().nullable().optional(),
+});
+
+export const reorderProviderPhotosBodySchema = z.object({
+  providerId: z.string().uuid(),
+  orderedIds: z.array(z.string().uuid()).min(1),
+  coverId: z.string().uuid().nullable().optional(),
+});
+
+export const deleteProviderPhotoBodySchema = z.object({
+  providerId: z.string().uuid(),
+  photoId: z.string().uuid(),
 });
 
 export type PackageRecommendationDto = z.infer<typeof packageRecommendationSchema>;

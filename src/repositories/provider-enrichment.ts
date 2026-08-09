@@ -7,9 +7,12 @@ export type ProviderProfileRow = {
   providerName: string;
   placeId: string;
   isManual: boolean;
+  description: string | null;
   address: string | null;
   phone: string | null;
   website: string | null;
+  lat: number | null;
+  lng: number | null;
   categories: ProviderCategory[];
   city: string | null;
   homeSector: string | null;
@@ -64,9 +67,14 @@ function mapProfileRow(row: any, cityFallback: string | null = null): ProviderPr
     providerName: provider.name as string,
     placeId,
     isManual: placeId.startsWith("manual:"),
+    description: (provider.description as string | null | undefined) ?? null,
     address: (provider.address as string | null | undefined) ?? null,
     phone: (provider.phone as string | null | undefined) ?? null,
     website: (provider.website as string | null | undefined) ?? null,
+    lat:
+      provider.lat === null || provider.lat === undefined ? null : Number(provider.lat),
+    lng:
+      provider.lng === null || provider.lng === undefined ? null : Number(provider.lng),
     categories,
     city: Array.isArray(cityRelation)
       ? (cityRelation[0]?.name ?? cityFallback)
@@ -132,9 +140,12 @@ export async function listProviderProfilesForCity(
         id,
         place_id,
         name,
+        description,
         address,
         phone,
         website,
+        lat,
+        lng,
         categories,
         home_sector,
         rating,
@@ -387,7 +398,7 @@ export async function getProviderProfileForMember(
       price_min,
       price_max,
       provider:providers!inner(
-        id, place_id, name, address, phone, website, categories, home_sector,
+        id, place_id, name, description, address, phone, website, lat, lng, categories, home_sector,
         rating, review_count, recommendation_score
       )
     `,
@@ -424,9 +435,12 @@ export async function updateProviderProfile(
     priceMin: number;
     priceMax: number;
     providerName?: string;
+    description?: string | null;
     address?: string | null;
     phone?: string | null;
     website?: string | null;
+    lat?: number | null;
+    lng?: number | null;
   },
 ): Promise<void> {
   const { error } = await supabase
@@ -452,17 +466,19 @@ export async function updateProviderProfile(
 
   const identityPatch: Record<string, unknown> = {};
   if (input.providerName !== undefined) identityPatch.name = input.providerName;
+  if (input.description !== undefined) identityPatch.description = input.description;
   if (input.address !== undefined) identityPatch.address = input.address;
   if (input.phone !== undefined) identityPatch.phone = input.phone;
   if (input.website !== undefined) identityPatch.website = input.website;
+  if (input.lat !== undefined) identityPatch.lat = input.lat;
+  if (input.lng !== undefined) identityPatch.lng = input.lng;
 
   if (Object.keys(identityPatch).length > 0) {
     identityPatch.updated_at = new Date().toISOString();
     const { error: providerError } = await supabase
       .from("providers")
       .update(identityPatch)
-      .eq("id", providerId)
-      .like("place_id", "manual:%");
+      .eq("id", providerId);
 
     if (providerError) {
       throw new Error(`Failed to update provider identity: ${providerError.message}`);

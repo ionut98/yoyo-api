@@ -7,10 +7,10 @@ import type {
 } from "../schemas/providers.js";
 
 const PROVIDER_SELECT = `
-  id, place_id, name, address, phone, website,
+  id, place_id, name, description, address, phone, website,
   rating, review_count, lat, lng, categories, maps_url,
   city:cities(id, name),
-  provider_photos(id, public_url, width_px, height_px)
+  provider_photos(id, public_url, width_px, height_px, sort_order, is_cover)
 `;
 
 async function resolveCityId(

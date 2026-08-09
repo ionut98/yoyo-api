@@ -32,13 +32,21 @@ import {
   providerRespondToItem,
 } from "../services/booking/package-requests.js";
 import {
+  deleteProviderPhoto,
+  listProviderPhotos,
+  reorderProviderPhotos,
+  uploadProviderPhoto,
+} from "../repositories/provider-photos.js";
+import {
   cancelProviderReservationBodySchema,
   createProviderBodySchema,
   createProviderReservationBodySchema,
   deleteProviderAvailabilityBodySchema,
+  deleteProviderPhotoBodySchema,
   providerPackageItemActionSchema,
   providerProfileSchema,
   providerReservationSchema,
+  reorderProviderPhotosBodySchema,
   updateProviderAvailabilityBodySchema,
   updateProviderProfileBodySchema,
   updateProviderReservationBodySchema,
@@ -61,15 +69,22 @@ async function requireProviderMembership(
   return supabase;
 }
 
-function toProfileDto(profile: NonNullable<Awaited<ReturnType<typeof getProviderProfileForMember>>>) {
+async function toProfileDto(
+  supabase: Awaited<ReturnType<typeof getSupabaseForRequest>>,
+  profile: NonNullable<Awaited<ReturnType<typeof getProviderProfileForMember>>>,
+) {
+  const photos = await listProviderPhotos(supabase, profile.providerId);
   return providerProfileSchema.parse({
     providerId: profile.providerId,
     providerName: profile.providerName,
     placeId: profile.placeId,
     isManual: profile.isManual,
+    description: profile.description,
     address: profile.address,
     phone: profile.phone,
     website: profile.website,
+    lat: profile.lat,
+    lng: profile.lng,
     categories: profile.categories,
     homeSector: profile.homeSector,
     rating: profile.rating,
@@ -83,6 +98,7 @@ function toProfileDto(profile: NonNullable<Awaited<ReturnType<typeof getProvider
     serviceAreaSectors: profile.serviceAreaSectors,
     priceMin: profile.priceMin,
     priceMax: profile.priceMax,
+    photos,
   });
 }
 
@@ -430,7 +446,7 @@ export function createProviderConsoleRoutes(env: Env) {
       const supabase = await requireProviderMembership(env, c as any, providerId);
       const profile = await getProviderProfileForMember(supabase, providerId);
       if (!profile) return c.json({ error: "Provider profile not found" }, 404);
-      return c.json(toProfileDto(profile));
+      return c.json(await toProfileDto(supabase, profile));
     } catch (error) {
       console.error(error);
       return c.json({ error: "Failed to load provider profile" }, 500);
@@ -447,10 +463,115 @@ export function createProviderConsoleRoutes(env: Env) {
     try {
       const supabase = await requireProviderMembership(env, c as any, parsed.data.providerId);
       await updateProviderProfile(supabase, parsed.data.providerId, parsed.data);
-      return c.json({ ok: true });
+      const profile = await getProviderProfileForMember(supabase, parsed.data.providerId);
+      if (!profile) return c.json({ ok: true });
+      return c.json(await toProfileDto(supabase, profile));
     } catch (error) {
       console.error(error);
       return c.json({ error: "Failed to update provider profile" }, 500);
+    }
+  });
+
+  routes.get("/photos/:providerId", async (c) => {
+    const providerId = z.string().uuid().parse(c.req.param("providerId"));
+    try {
+      const supabase = await requireProviderMembership(env, c as any, providerId);
+      const photos = await listProviderPhotos(supabase, providerId);
+      return c.json({ data: photos });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: "Failed to load photos" }, 403);
+    }
+  });
+
+  routes.post("/photos", async (c) => {
+    try {
+      const form = await c.req.parseBody({ all: true });
+      const providerIdRaw = form.providerId;
+      const providerId =
+        typeof providerIdRaw === "string" ? z.string().uuid().parse(providerIdRaw) : null;
+      if (!providerId) {
+        return c.json({ error: "providerId is required" }, 400);
+      }
+
+      const supabase = await requireProviderMembership(env, c as any, providerId);
+      const fileField = form.file;
+      const files = Array.isArray(fileField) ? fileField : fileField ? [fileField] : [];
+      const uploaded = [];
+
+      for (const entry of files) {
+        if (typeof entry === "string" || !entry || typeof (entry as File).arrayBuffer !== "function") {
+          continue;
+        }
+        const file = entry as File;
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        uploaded.push(
+          await uploadProviderPhoto(supabase, providerId, {
+            bytes,
+            contentType: file.type || "image/jpeg",
+            fileName: file.name,
+          }),
+        );
+      }
+
+      if (uploaded.length === 0) {
+        return c.json({ error: "No image files provided" }, 400);
+      }
+
+      return c.json({ data: await listProviderPhotos(supabase, providerId) }, 201);
+    } catch (error) {
+      console.error(error);
+      return c.json(
+        { error: error instanceof Error ? error.message : "Failed to upload photos" },
+        500,
+      );
+    }
+  });
+
+  routes.patch("/photos/reorder", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = reorderProviderPhotosBodySchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid reorder payload", details: z.treeifyError(parsed.error) }, 400);
+    }
+    try {
+      const supabase = await requireProviderMembership(env, c as any, parsed.data.providerId);
+      const data = await reorderProviderPhotos(
+        supabase,
+        parsed.data.providerId,
+        parsed.data.orderedIds,
+        parsed.data.coverId,
+      );
+      return c.json({ data });
+    } catch (error) {
+      console.error(error);
+      return c.json(
+        { error: error instanceof Error ? error.message : "Failed to reorder photos" },
+        500,
+      );
+    }
+  });
+
+  routes.delete("/photos", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = deleteProviderPhotoBodySchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid delete photo payload", details: z.treeifyError(parsed.error) }, 400);
+    }
+    try {
+      const supabase = await requireProviderMembership(env, c as any, parsed.data.providerId);
+      const data = await deleteProviderPhoto(
+        supabase,
+        parsed.data.providerId,
+        parsed.data.photoId,
+      );
+      return c.json({ data });
+    } catch (error) {
+      console.error(error);
+      return c.json(
+        { error: error instanceof Error ? error.message : "Failed to delete photo" },
+        500,
+      );
     }
   });
 

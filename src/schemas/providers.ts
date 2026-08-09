@@ -31,12 +31,15 @@ export const providerPhotoSchema = z.object({
   publicUrl: z.string().nullable(),
   widthPx: z.number().nullable(),
   heightPx: z.number().nullable(),
+  sortOrder: z.number().int().nonnegative().default(0),
+  isCover: z.boolean().default(false),
 });
 
 export const providerSchema = z.object({
   id: z.string().uuid(),
   placeId: z.string(),
   name: z.string(),
+  description: z.string().nullable().default(null),
   categories: z.array(providerCategorySchema),
   address: z.string().nullable(),
   phone: z.string().nullable(),

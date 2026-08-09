@@ -15,6 +15,9 @@ export type ProviderReservationDto = {
   budget: string | null;
   sector: string | null;
   city: string | null;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
   themeLabel: string | null;
   activities: string[];
   notes: string | null;
@@ -34,6 +37,9 @@ export type ProviderReservationInput = {
   budget?: string | null;
   sector?: string | null;
   city?: string | null;
+  address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
   themeLabel?: string | null;
   activities?: string[];
   notes?: string | null;
@@ -54,6 +60,9 @@ function mapReservationRow(row: Record<string, unknown>): ProviderReservationDto
     budget: (row.budget as string | null) ?? null,
     sector: (row.sector as string | null) ?? null,
     city: (row.city as string | null) ?? null,
+    address: (row.address as string | null) ?? null,
+    lat: typeof row.lat === "number" ? row.lat : row.lat != null ? Number(row.lat) : null,
+    lng: typeof row.lng === "number" ? row.lng : row.lng != null ? Number(row.lng) : null,
     themeLabel: (row.theme_label as string | null) ?? null,
     activities: (row.activities as string[] | null) ?? [],
     notes: (row.notes as string | null) ?? null,
@@ -67,6 +76,7 @@ const RESERVATION_SELECT = `
   id, provider_id, starts_at, ends_at, origin,
   parent_name, parent_phone, parent_email,
   age_range, guest_count, budget, sector, city,
+  address, lat, lng,
   theme_label, activities, notes, status,
   created_at, updated_at
 `;
@@ -178,6 +188,10 @@ export async function createProviderReservation(
   if (!parentName) {
     throw new Error("parentName is required");
   }
+  const address = input.address?.trim() || "";
+  if (!address) {
+    throw new Error("address is required");
+  }
 
   const { data, error } = await supabase
     .from("provider_reservations")
@@ -194,6 +208,9 @@ export async function createProviderReservation(
       budget: input.budget || null,
       sector: input.sector || null,
       city: input.city?.trim() || "București",
+      address,
+      lat: input.lat ?? null,
+      lng: input.lng ?? null,
       theme_label: input.themeLabel?.trim() || null,
       activities: input.activities ?? [],
       notes: input.notes?.trim() || null,
@@ -224,6 +241,10 @@ export async function updateProviderReservation(
   if (!parentName) {
     throw new Error("parentName is required");
   }
+  const address = input.address?.trim() || "";
+  if (!address) {
+    throw new Error("address is required");
+  }
 
   const existing = await getProviderReservation(supabase, reservationId);
   if (!existing || existing.providerId !== providerId) {
@@ -246,6 +267,9 @@ export async function updateProviderReservation(
       budget: input.budget || null,
       sector: input.sector || null,
       city: input.city?.trim() || "București",
+      address,
+      lat: input.lat ?? null,
+      lng: input.lng ?? null,
       theme_label: input.themeLabel?.trim() || null,
       activities: input.activities ?? [],
       notes: input.notes?.trim() || null,
