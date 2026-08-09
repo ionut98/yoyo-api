@@ -70,3 +70,76 @@ export const DEFAULT_AVAILABILITY_WINDOWS = [
   { startHour: 16, endHour: 18 },
   { startHour: 18, endHour: 20 },
 ] as const;
+
+/** YYYY-MM-DD dates from startIso (inclusive) to endIso (exclusive), Bucharest calendar days. */
+export function eachBucharestDateInRange(startIso: string, endIso: string): string[] {
+  const startDay = formatBucharestDate(new Date(startIso));
+  const endDay = formatBucharestDate(new Date(Date.parse(endIso) - 1));
+  if (Date.parse(endIso) <= Date.parse(startIso)) return [];
+
+  const dates: string[] = [];
+  let cursor = startDay;
+  while (cursor <= endDay) {
+    dates.push(cursor);
+    const [year, month, day] = cursor.split("-").map(Number);
+    const next = new Date(Date.UTC(year!, month! - 1, day! + 1));
+    cursor = next.toISOString().slice(0, 10);
+  }
+  return dates;
+}
+
+/**
+ * Default Liber slots for days/windows with no existing coverage.
+ * Used by the provider calendar so far-future months aren't blank.
+ */
+export function buildDefaultAvailableSlots(options: {
+  providerId: string;
+  startIso: string;
+  endIso: string;
+  existingIntervals: Array<{ startsAt: string; endsAt: string }>;
+  nowMs?: number;
+}): Array<{
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  status: "available";
+  source: "availability";
+}> {
+  const nowMs = options.nowMs ?? Date.now();
+  const rangeStart = Date.parse(options.startIso);
+  const rangeEnd = Date.parse(options.endIso);
+  const slots: Array<{
+    id: string;
+    startsAt: string;
+    endsAt: string;
+    status: "available";
+    source: "availability";
+  }> = [];
+
+  for (const date of eachBucharestDateInRange(options.startIso, options.endIso)) {
+    for (const window of DEFAULT_AVAILABILITY_WINDOWS) {
+      const startsAt = bucharestDateTimeIso(date, window.startHour, 0);
+      const endsAt = bucharestDateTimeIso(date, window.endHour, 0);
+      const startMs = Date.parse(startsAt);
+      const endMs = Date.parse(endsAt);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
+      if (endMs <= nowMs) continue;
+      if (endMs <= rangeStart || startMs >= rangeEnd) continue;
+
+      const covered = options.existingIntervals.some((interval) =>
+        intervalsOverlap(startsAt, endsAt, interval.startsAt, interval.endsAt),
+      );
+      if (covered) continue;
+
+      slots.push({
+        id: `default:${options.providerId}:${startsAt}`,
+        startsAt,
+        endsAt,
+        status: "available",
+        source: "availability",
+      });
+    }
+  }
+
+  return slots;
+}

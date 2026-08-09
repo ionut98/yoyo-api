@@ -31,6 +31,7 @@ import {
   providerDismissExpiredItem,
   providerRespondToItem,
 } from "../services/booking/package-requests.js";
+import { buildDefaultAvailableSlots } from "../lib/time-intervals.js";
 import {
   deleteProviderPhoto,
   listProviderPhotos,
@@ -393,21 +394,43 @@ export function createProviderConsoleRoutes(env: Env) {
         }
       }
 
+      const mapped = rows.map((row) => ({
+        id: row.id,
+        startsAt: row.startsAt,
+        endsAt: row.endsAt,
+        status: row.status,
+        source: row.source ?? ("availability" as const),
+        packageId: row.packageId ?? null,
+        packageItemId: row.packageItemId ?? null,
+        reservationId: row.reservationId ?? null,
+        title:
+          row.title ??
+          (row.packageId ? (titleByPackageId.get(row.packageId) ?? "Rezervare") : null),
+      }));
+
+      const defaults = buildDefaultAvailableSlots({
+        providerId,
+        startIso,
+        endIso,
+        existingIntervals: mapped.map((event) => ({
+          startsAt: event.startsAt,
+          endsAt: event.endsAt,
+        })),
+      }).map((slot) => ({
+        id: slot.id,
+        startsAt: slot.startsAt,
+        endsAt: slot.endsAt,
+        status: slot.status,
+        source: slot.source,
+        packageId: null,
+        packageItemId: null,
+        reservationId: null,
+        title: null as string | null,
+      }));
+
       return c.json({
         providerId,
-        events: rows.map((row) => ({
-          id: row.id,
-          startsAt: row.startsAt,
-          endsAt: row.endsAt,
-          status: row.status,
-          source: row.source ?? ("availability" as const),
-          packageId: row.packageId ?? null,
-          packageItemId: row.packageItemId ?? null,
-          reservationId: row.reservationId ?? null,
-          title:
-            row.title ??
-            (row.packageId ? (titleByPackageId.get(row.packageId) ?? "Rezervare") : null),
-        })),
+        events: [...mapped, ...defaults],
       });
     } catch (error) {
       console.error(error);
