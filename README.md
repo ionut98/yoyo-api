@@ -60,7 +60,7 @@ curl -H "Authorization: Bearer <access_token>" \
 | `SUPABASE_PUBLISHABLE_KEY` | Yes* | Supabase publishable key (public reads via RLS) |
 | `SUPABASE_ANON_KEY` | Yes* | Legacy alias for publishable key |
 | `PORT` | No | Server port (default 3001) |
-| `CORS_ORIGIN` | No | Allowed CORS origin (default `http://localhost:5173`) |
+| `CORS_ORIGIN` | No | Allowed CORS origin(s), comma-separated (default `http://localhost:8080,https://yoyoparty.lovable.app`) |
 
 \* One of `SUPABASE_PUBLISHABLE_KEY` or `SUPABASE_ANON_KEY` is required.
 

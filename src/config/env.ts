@@ -11,7 +11,15 @@ const envSchema = z
     SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
     SUPABASE_ANON_KEY: z.string().min(1).optional(),
     PORT: z.coerce.number().int().positive().default(3001),
-    CORS_ORIGIN: z.string().default("http://localhost:5173"),
+    CORS_ORIGIN: z
+      .string()
+      .default("http://localhost:8080,https://yoyoparty.lovable.app")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((origin) => origin.trim())
+          .filter((origin) => origin.length > 0),
+      ),
   })
   .transform((env) => {
     const supabaseKey = firstDefined(env.SUPABASE_PUBLISHABLE_KEY, env.SUPABASE_ANON_KEY);
