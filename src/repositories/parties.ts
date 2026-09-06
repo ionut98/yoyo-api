@@ -1,11 +1,25 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { toPartyDto } from "../mappers/parties.js";
-import type { CreatePartyBody, ListPartiesResponse, PartyDto } from "../schemas/parties.js";
+import { toPartyDto, toScheduleItemDto } from "../mappers/parties.js";
+import type {
+  CreatePartyBody,
+  ListPartiesResponse,
+  PartyDto,
+  PartyHubResponse,
+  PartyScheduleItemDto,
+  PatchPartyBody,
+  PutScheduleBody,
+} from "../schemas/parties.js";
 import { expireStalePackageRequests } from "../services/booking/package-requests.js";
 
 const PARTY_SELECT = `
   id, age_range, budget, guest_count, date_preference, preferred_date,
-  sector, theme_id, theme_custom, activities, status, city, created_at, updated_at
+  sector, theme_id, theme_custom, activities, status, city,
+  notes, party_starts_at, party_ends_at, created_at, updated_at
+`;
+
+const SCHEDULE_SELECT = `
+  id, party_id, kind, title, starts_at, ends_at, notes, package_item_id,
+  sort_order, created_at, updated_at
 `;
 
 const BOOKING_STATUS_PRIORITY: Record<string, number> = {
@@ -14,6 +28,13 @@ const BOOKING_STATUS_PRIORITY: Record<string, number> = {
   requested: 40,
   failed: 30,
   expired: 20,
+};
+
+const ROLE_LABEL: Record<string, string> = {
+  space: "Locație",
+  entertainment: "Animație",
+  balloons: "Baloane",
+  cakes: "Tort",
 };
 
 function normalizeBookingStatus(value: string | null | undefined): PartyDto["bookingStatus"] {
@@ -134,6 +155,8 @@ export async function getPartyById(
   userId: string,
   partyId: string,
 ): Promise<PartyDto | null> {
+  await expireStalePackageRequests(supabase);
+
   const { data, error } = await supabase
     .from("parties")
     .select(PARTY_SELECT)
@@ -145,5 +168,308 @@ export async function getPartyById(
     throw new Error(`Failed to get party: ${error.message}`);
   }
 
-  return data ? toPartyDto(data) : null;
+  if (!data) return null;
+
+  const bookingByParty = await bookingStatusByPartyId(supabase, [partyId]);
+  return toPartyDto(data, bookingByParty.get(partyId) ?? "none");
+}
+
+export async function patchPartyForUser(
+  supabase: SupabaseClient,
+  userId: string,
+  partyId: string,
+  body: PatchPartyBody,
+): Promise<PartyDto | null> {
+  const existing = await getPartyById(supabase, userId, partyId);
+  if (!existing) return null;
+
+  const nextStarts =
+    body.partyStartsAt !== undefined ? body.partyStartsAt : existing.partyStartsAt;
+  const nextEnds = body.partyEndsAt !== undefined ? body.partyEndsAt : existing.partyEndsAt;
+
+  if (nextStarts && nextEnds && new Date(nextEnds).getTime() <= new Date(nextStarts).getTime()) {
+    throw new Error("INVALID_PARTY_WINDOW");
+  }
+
+  const patch: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (body.notes !== undefined) patch.notes = body.notes;
+  if (body.partyStartsAt !== undefined) patch.party_starts_at = body.partyStartsAt;
+  if (body.partyEndsAt !== undefined) patch.party_ends_at = body.partyEndsAt;
+
+  const { data, error } = await supabase
+    .from("parties")
+    .update(patch)
+    .eq("user_id", userId)
+    .eq("id", partyId)
+    .select(PARTY_SELECT)
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to update party: ${error.message}`);
+  }
+
+  return toPartyDto(data, existing.bookingStatus);
+}
+
+type BookingSummary = NonNullable<PartyHubResponse["booking"]>;
+
+async function getActiveBookingSummary(
+  supabase: SupabaseClient,
+  partyId: string,
+): Promise<BookingSummary | null> {
+  const { data, error } = await supabase
+    .from("party_packages")
+    .select(
+      `
+      id, status, booking_kind, target_starts_at, target_ends_at,
+      estimated_price_min, estimated_price_max, requested_at,
+      party_package_items(
+        id, provider_id, role, starts_at, ends_at, item_status,
+        provider:providers(name)
+      )
+    `,
+    )
+    .eq("party_id", partyId)
+    .neq("status", "proposed")
+    .neq("status", "cancelled")
+    .order("requested_at", { ascending: false })
+    .limit(8);
+
+  if (error) {
+    throw new Error(`Failed to load party booking: ${error.message}`);
+  }
+
+  const rows = data ?? [];
+  if (rows.length === 0) return null;
+
+  rows.sort((a, b) => {
+    const pa = BOOKING_STATUS_PRIORITY[a.status as string] ?? 0;
+    const pb = BOOKING_STATUS_PRIORITY[b.status as string] ?? 0;
+    return pb - pa;
+  });
+
+  const row = rows[0];
+  const items = ((row.party_package_items as any[]) ?? []).map((item) => {
+    const provider = Array.isArray(item.provider) ? item.provider[0] : item.provider;
+    return {
+      id: item.id as string,
+      providerId: item.provider_id as string,
+      providerName: (provider?.name as string | undefined) ?? "Furnizor",
+      role: item.role as string,
+      startsAt: (item.starts_at as string | null) ?? null,
+      endsAt: (item.ends_at as string | null) ?? null,
+      itemStatus: item.item_status as string,
+    };
+  });
+
+  return {
+    packageId: row.id as string,
+    status: row.status as string,
+    bookingKind: row.booking_kind as string,
+    targetStartsAt: row.target_starts_at as string,
+    targetEndsAt: row.target_ends_at as string,
+    estimatedPriceMin: Number(row.estimated_price_min),
+    estimatedPriceMax: Number(row.estimated_price_max),
+    items,
+  };
+}
+
+export async function listScheduleForParty(
+  supabase: SupabaseClient,
+  userId: string,
+  partyId: string,
+): Promise<PartyScheduleItemDto[] | null> {
+  const party = await getPartyById(supabase, userId, partyId);
+  if (!party) return null;
+
+  const { data, error } = await supabase
+    .from("party_schedule_items")
+    .select(SCHEDULE_SELECT)
+    .eq("party_id", partyId)
+    .order("sort_order", { ascending: true })
+    .order("starts_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to list schedule: ${error.message}`);
+  }
+
+  return (data ?? []).map((row) => toScheduleItemDto(row));
+}
+
+export async function getPartyHubForUser(
+  supabase: SupabaseClient,
+  userId: string,
+  partyId: string,
+): Promise<PartyHubResponse | null> {
+  const party = await getPartyById(supabase, userId, partyId);
+  if (!party) return null;
+
+  const [booking, schedule] = await Promise.all([
+    getActiveBookingSummary(supabase, partyId),
+    listScheduleForParty(supabase, userId, partyId),
+  ]);
+
+  return {
+    party,
+    booking,
+    schedule: schedule ?? [],
+  };
+}
+
+export async function replaceScheduleForParty(
+  supabase: SupabaseClient,
+  userId: string,
+  partyId: string,
+  body: PutScheduleBody,
+): Promise<PartyScheduleItemDto[] | null> {
+  const party = await getPartyById(supabase, userId, partyId);
+  if (!party) return null;
+
+  const { error: deleteError } = await supabase
+    .from("party_schedule_items")
+    .delete()
+    .eq("party_id", partyId);
+
+  if (deleteError) {
+    throw new Error(`Failed to clear schedule: ${deleteError.message}`);
+  }
+
+  if (body.items.length === 0) {
+    return [];
+  }
+
+  const now = new Date().toISOString();
+  const rows = body.items.map((item, index) => {
+    const row: Record<string, unknown> = {
+      party_id: partyId,
+      kind: item.kind,
+      title: item.title.trim(),
+      starts_at: item.startsAt,
+      ends_at: item.endsAt ?? null,
+      notes: item.notes?.trim() ? item.notes.trim() : null,
+      package_item_id: item.packageItemId ?? null,
+      sort_order: item.sortOrder ?? index,
+      created_at: now,
+      updated_at: now,
+    };
+    if (item.id) row.id = item.id;
+    return row;
+  });
+
+  const { data, error } = await supabase
+    .from("party_schedule_items")
+    .insert(rows)
+    .select(SCHEDULE_SELECT)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to save schedule: ${error.message}`);
+  }
+
+  return (data ?? []).map((row) => toScheduleItemDto(row));
+}
+
+function shiftMinutes(iso: string, minutes: number): string {
+  const date = new Date(iso);
+  date.setMinutes(date.getMinutes() + minutes);
+  return date.toISOString();
+}
+
+export async function seedScheduleForParty(
+  supabase: SupabaseClient,
+  userId: string,
+  partyId: string,
+): Promise<PartyHubResponse | null> {
+  const hub = await getPartyHubForUser(supabase, userId, partyId);
+  if (!hub) return null;
+
+  if (hub.schedule.length > 0) {
+    throw new Error("SCHEDULE_NOT_EMPTY");
+  }
+
+  const booking = hub.booking;
+  if (!booking) {
+    throw new Error("NO_ACTIVE_BOOKING");
+  }
+
+  const confirmedLike = booking.items.filter((item) =>
+    ["confirmed", "held", "proposed"].includes(item.itemStatus),
+  );
+  const providerItems = (confirmedLike.length > 0 ? confirmedLike : booking.items).filter(
+    (item) => item.startsAt && item.endsAt,
+  );
+
+  const windowStart = booking.targetStartsAt;
+  const windowEnd = booking.targetEndsAt;
+
+  await patchPartyForUser(supabase, userId, partyId, {
+    partyStartsAt: windowStart,
+    partyEndsAt: windowEnd,
+  });
+
+  const items: PutScheduleBody["items"] = [];
+  let order = 0;
+
+  items.push({
+    kind: "arrival",
+    title: "Sosire invitați",
+    startsAt: shiftMinutes(windowStart, -30),
+    endsAt: windowStart,
+    notes: "Bun venit, fotografii, așezare",
+    sortOrder: order++,
+  });
+
+  for (const item of providerItems) {
+    if (!item.startsAt) continue;
+    items.push({
+      kind: "provider",
+      title: `${ROLE_LABEL[item.role] ?? "Furnizor"} · ${item.providerName}`,
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+      notes: null,
+      packageItemId: item.id,
+      sortOrder: order++,
+    });
+  }
+
+  const hasCake = providerItems.some((item) => item.role === "cakes");
+  if (!hasCake) {
+    items.push({
+      kind: "cake",
+      title: "Tort și urări",
+      startsAt: shiftMinutes(windowEnd, -45),
+      endsAt: shiftMinutes(windowEnd, -20),
+      notes: null,
+      sortOrder: order++,
+    });
+  }
+
+  items.push({
+    kind: "photo",
+    title: "Poze de grup",
+    startsAt: shiftMinutes(windowEnd, -20),
+    endsAt: shiftMinutes(windowEnd, -5),
+    notes: null,
+    sortOrder: order++,
+  });
+
+  items.push({
+    kind: "departure",
+    title: "Plecare",
+    startsAt: windowEnd,
+    endsAt: shiftMinutes(windowEnd, 15),
+    notes: null,
+    sortOrder: order++,
+  });
+
+  // Expand party window to cover arrival/departure suggestions.
+  await patchPartyForUser(supabase, userId, partyId, {
+    partyStartsAt: shiftMinutes(windowStart, -30),
+    partyEndsAt: shiftMinutes(windowEnd, 15),
+  });
+
+  await replaceScheduleForParty(supabase, userId, partyId, { items });
+  return getPartyHubForUser(supabase, userId, partyId);
 }
