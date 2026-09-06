@@ -9,6 +9,28 @@ import {
 import { getPackageById } from "../repositories/package-requests.js";
 import { cancelPackageBooking, requestPackageBooking } from "../services/booking/package-requests.js";
 
+const requestPackageBodySchema = z
+  .object({
+    itemTimes: z
+      .array(
+        z.object({
+          itemId: z.string().uuid(),
+          startsAt: z.string().datetime({ offset: true }),
+          endsAt: z.string().datetime({ offset: true }),
+        }),
+      )
+      .min(1)
+      .optional(),
+  })
+  .optional()
+  .default({});
+
+const CLIENT_REQUEST_ERRORS = new Set([
+  "ITEM_TIMES_REQUIRED",
+  "INVALID_ITEM_TIMES",
+  "ITEM_TIMES_WRONG_DAY",
+]);
+
 export function createPackageRequestRoutes(env: Env) {
   const routes = new Hono<{ Variables: AuthVariables }>();
   routes.use("*", createRequireAuth(env));
@@ -20,12 +42,18 @@ export function createPackageRequestRoutes(env: Env) {
     }
 
     try {
+      const body = requestPackageBodySchema.parse(await c.req.json().catch(() => ({})));
       const supabase = getSupabaseForRequest(c, env);
-      const pkg = await requestPackageBooking(supabase, parsed.data);
+      const pkg = await requestPackageBooking(supabase, parsed.data, {
+        itemTimes: body.itemTimes,
+      });
       return c.json(pkg);
     } catch (error) {
       console.error(error);
       const message = error instanceof Error ? error.message : "Failed to request package";
+      if (CLIENT_REQUEST_ERRORS.has(message)) {
+        return c.json({ error: message }, 400);
+      }
       const unavailable = message.includes("is not available");
       return c.json({ error: message }, unavailable ? 409 : 500);
     }

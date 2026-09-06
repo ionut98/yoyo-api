@@ -9,6 +9,7 @@ import type {
   PatchPartyBody,
   PutScheduleBody,
 } from "../schemas/parties.js";
+import { formatBucharestDate } from "../lib/time-intervals.js";
 import { expireStalePackageRequests } from "../services/booking/package-requests.js";
 
 const PARTY_SELECT = `
@@ -180,8 +181,11 @@ export async function patchPartyForUser(
   partyId: string,
   body: PatchPartyBody,
 ): Promise<PartyDto | null> {
-  const existing = await getPartyById(supabase, userId, partyId);
-  if (!existing) return null;
+  const hub = await getPartyHubForUser(supabase, userId, partyId);
+  if (!hub) return null;
+  const existing = hub.party;
+
+  assertPartyEditable(hub);
 
   const nextStarts =
     body.partyStartsAt !== undefined ? body.partyStartsAt : existing.partyStartsAt;
@@ -189,6 +193,20 @@ export async function patchPartyForUser(
 
   if (nextStarts && nextEnds && new Date(nextEnds).getTime() <= new Date(nextStarts).getTime()) {
     throw new Error("INVALID_PARTY_WINDOW");
+  }
+
+  const partyDay = resolvePartyDay(hub);
+  if (partyDay) {
+    if (body.partyStartsAt) {
+      if (formatBucharestDate(new Date(body.partyStartsAt)) !== partyDay) {
+        throw new Error("PARTY_DAY_MISMATCH");
+      }
+    }
+    if (body.partyEndsAt) {
+      if (formatBucharestDate(new Date(body.partyEndsAt)) !== partyDay) {
+        throw new Error("PARTY_DAY_MISMATCH");
+      }
+    }
   }
 
   const patch: Record<string, unknown> = {
@@ -213,6 +231,27 @@ export async function patchPartyForUser(
   return toPartyDto(data, existing.bookingStatus);
 }
 
+function resolvePartyDay(hub: PartyHubResponse): string | null {
+  if (hub.booking?.targetDate) return hub.booking.targetDate.slice(0, 10);
+  if (hub.party.preferredDate) return hub.party.preferredDate.slice(0, 10);
+  if (hub.booking?.targetStartsAt) {
+    return formatBucharestDate(new Date(hub.booking.targetStartsAt));
+  }
+  if (hub.party.partyStartsAt) {
+    return formatBucharestDate(new Date(hub.party.partyStartsAt));
+  }
+  return null;
+}
+
+function assertPartyEditable(hub: PartyHubResponse): void {
+  const endIso =
+    hub.party.partyEndsAt ?? hub.booking?.targetEndsAt ?? hub.party.partyStartsAt ?? null;
+  if (!endIso) return;
+  if (Date.parse(endIso) < Date.now()) {
+    throw new Error("PARTY_IN_PAST");
+  }
+}
+
 type BookingSummary = NonNullable<PartyHubResponse["booking"]>;
 
 async function getActiveBookingSummary(
@@ -223,7 +262,7 @@ async function getActiveBookingSummary(
     .from("party_packages")
     .select(
       `
-      id, status, booking_kind, target_starts_at, target_ends_at,
+      id, status, booking_kind, target_date, target_starts_at, target_ends_at,
       estimated_price_min, estimated_price_max, requested_at,
       party_package_items(
         id, provider_id, role, starts_at, ends_at, item_status,
@@ -268,6 +307,7 @@ async function getActiveBookingSummary(
     packageId: row.id as string,
     status: row.status as string,
     bookingKind: row.booking_kind as string,
+    targetDate: String(row.target_date).slice(0, 10),
     targetStartsAt: row.target_starts_at as string,
     targetEndsAt: row.target_ends_at as string,
     estimatedPriceMin: Number(row.estimated_price_min),
@@ -324,8 +364,41 @@ export async function replaceScheduleForParty(
   partyId: string,
   body: PutScheduleBody,
 ): Promise<PartyScheduleItemDto[] | null> {
-  const party = await getPartyById(supabase, userId, partyId);
-  if (!party) return null;
+  const hub = await getPartyHubForUser(supabase, userId, partyId);
+  if (!hub) return null;
+
+  assertPartyEditable(hub);
+
+  const partyDay = resolvePartyDay(hub);
+  const lockedByPackageItemId = new Map(
+    (hub.booking?.items ?? [])
+      .filter((item) => item.startsAt && item.endsAt)
+      .map((item) => [
+        item.id,
+        { startsAt: item.startsAt as string, endsAt: item.endsAt as string },
+      ]),
+  );
+
+  for (const item of body.items) {
+    if (partyDay) {
+      if (formatBucharestDate(new Date(item.startsAt)) !== partyDay) {
+        throw new Error("PARTY_DAY_MISMATCH");
+      }
+      if (item.endsAt && formatBucharestDate(new Date(item.endsAt)) !== partyDay) {
+        throw new Error("PARTY_DAY_MISMATCH");
+      }
+    }
+
+    if (!item.packageItemId) continue;
+    const locked = lockedByPackageItemId.get(item.packageItemId);
+    if (!locked) {
+      throw new Error("PROVIDER_TIMES_LOCKED");
+    }
+    if (Date.parse(item.startsAt) !== Date.parse(locked.startsAt) ||
+      Date.parse(item.endsAt ?? "") !== Date.parse(locked.endsAt)) {
+      throw new Error("PROVIDER_TIMES_LOCKED");
+    }
+  }
 
   const { error: deleteError } = await supabase
     .from("party_schedule_items")

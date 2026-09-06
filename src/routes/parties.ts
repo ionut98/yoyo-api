@@ -119,6 +119,12 @@ export function createPartyRoutes(env: Env) {
       if (error instanceof Error && error.message === "INVALID_PARTY_WINDOW") {
         return c.json({ error: "partyEndsAt must be after partyStartsAt" }, 400);
       }
+      if (error instanceof Error && error.message === "PARTY_DAY_MISMATCH") {
+        return c.json({ error: "PARTY_DAY_MISMATCH" }, 400);
+      }
+      if (error instanceof Error && error.message === "PARTY_IN_PAST") {
+        return c.json({ error: "PARTY_IN_PAST" }, 403);
+      }
       console.error(error);
       return c.json({ error: "Failed to update party" }, 500);
     }
@@ -169,6 +175,15 @@ export function createPartyRoutes(env: Env) {
       }
       return c.json({ data: schedule });
     } catch (error) {
+      if (error instanceof Error && error.message === "PARTY_DAY_MISMATCH") {
+        return c.json({ error: "PARTY_DAY_MISMATCH" }, 400);
+      }
+      if (error instanceof Error && error.message === "PARTY_IN_PAST") {
+        return c.json({ error: "PARTY_IN_PAST" }, 403);
+      }
+      if (error instanceof Error && error.message === "PROVIDER_TIMES_LOCKED") {
+        return c.json({ error: "PROVIDER_TIMES_LOCKED" }, 400);
+      }
       console.error(error);
       return c.json({ error: "Failed to save schedule" }, 500);
     }

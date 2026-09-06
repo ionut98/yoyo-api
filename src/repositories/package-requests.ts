@@ -334,17 +334,24 @@ export async function getPackageById(
 export async function updatePackageRequestState(
   supabase: SupabaseClient,
   packageId: string,
-  state: { status: string; requestedAt?: string | null; expiresAt?: string | null },
+  state: {
+    status?: string;
+    requestedAt?: string | null;
+    expiresAt?: string | null;
+    targetStartsAt?: string;
+    targetEndsAt?: string;
+  },
 ): Promise<void> {
-  const { error } = await supabase
-    .from("party_packages")
-    .update({
-      status: state.status,
-      requested_at: state.requestedAt ?? undefined,
-      expires_at: state.expiresAt ?? undefined,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", packageId);
+  const patch: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (state.status !== undefined) patch.status = state.status;
+  if (state.requestedAt !== undefined) patch.requested_at = state.requestedAt;
+  if (state.expiresAt !== undefined) patch.expires_at = state.expiresAt;
+  if (state.targetStartsAt !== undefined) patch.target_starts_at = state.targetStartsAt;
+  if (state.targetEndsAt !== undefined) patch.target_ends_at = state.targetEndsAt;
+
+  const { error } = await supabase.from("party_packages").update(patch).eq("id", packageId);
 
   if (error) {
     throw new Error(`Failed to update package state: ${error.message}`);
@@ -362,6 +369,25 @@ export async function updatePackageItemState(
     .eq("id", itemId);
   if (error) {
     throw new Error(`Failed to update package item state: ${error.message}`);
+  }
+}
+
+export async function updatePackageItemTimes(
+  supabase: SupabaseClient,
+  itemId: string,
+  times: { startsAt: string; endsAt: string; date: string },
+): Promise<void> {
+  const { error } = await supabase
+    .from("party_package_items")
+    .update({
+      starts_at: times.startsAt,
+      ends_at: times.endsAt,
+      date: times.date,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", itemId);
+  if (error) {
+    throw new Error(`Failed to update package item times: ${error.message}`);
   }
 }
 

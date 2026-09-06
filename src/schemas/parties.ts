@@ -115,6 +115,7 @@ export const partyBookingSummarySchema = z
     packageId: z.string().uuid(),
     status: z.string(),
     bookingKind: z.string(),
+    targetDate: z.string(),
     targetStartsAt: z.string(),
     targetEndsAt: z.string(),
     estimatedPriceMin: z.number(),
