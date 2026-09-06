@@ -11,9 +11,20 @@ import { createRecommendationsForParty } from "../services/orchestrator/create-r
 const recommendationsBodySchema = z
   .object({
     regenerate: z.boolean().optional().default(false),
+    /** Required when regenerate=true — YYYY-MM-DD, must differ from the expired package date */
+    targetDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
   })
   .optional()
   .default({ regenerate: false });
+
+const CLIENT_ERRORS = new Set([
+  "TARGET_DATE_REQUIRED",
+  "TARGET_DATE_IN_PAST",
+  "TARGET_DATE_MUST_BE_NEW",
+]);
 
 export function createRecommendationRoutes(env: Env) {
   const routes = new Hono<{ Variables: AuthVariables }>();
@@ -32,11 +43,16 @@ export function createRecommendationRoutes(env: Env) {
       const supabase = getSupabaseForRequest(c, env);
       const data = await createRecommendationsForParty(supabase, parsed.data, user.id, {
         regenerate: body.regenerate,
+        targetDate: body.targetDate,
       });
       return c.json({ data });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create recommendations";
+      if (CLIENT_ERRORS.has(message)) {
+        return c.json({ error: message }, 400);
+      }
       console.error(error);
-      return c.json({ error: error instanceof Error ? error.message : "Failed to create recommendations" }, 500);
+      return c.json({ error: message }, 500);
     }
   });
 
