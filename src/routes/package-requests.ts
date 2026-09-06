@@ -7,6 +7,8 @@ import {
   type AuthVariables,
 } from "../middleware/auth.js";
 import { getPackageById } from "../repositories/package-requests.js";
+import { listEffectiveAvailability } from "../repositories/provider-enrichment.js";
+import { attachAvailableWindows } from "../services/orchestrator/available-windows.js";
 import { cancelPackageBooking, requestPackageBooking } from "../services/booking/package-requests.js";
 
 const requestPackageBodySchema = z
@@ -69,7 +71,22 @@ export function createPackageRequestRoutes(env: Env) {
       const supabase = getSupabaseForRequest(c, env);
       const pkg = await getPackageById(supabase, parsed.data);
       if (!pkg) return c.json({ error: "Package not found" }, 404);
-      return c.json(pkg);
+
+      if (pkg.status !== "proposed") {
+        return c.json({
+          ...pkg,
+          items: pkg.items.map((item) => ({
+            ...item,
+            availableWindows: item.availableWindows ?? [],
+          })),
+        });
+      }
+
+      const availability = await listEffectiveAvailability(supabase, {
+        providerIds: [...new Set(pkg.items.map((item) => item.providerId))],
+        date: pkg.targetDate.slice(0, 10),
+      });
+      return c.json(attachAvailableWindows(pkg, availability));
     } catch (error) {
       console.error(error);
       return c.json({ error: "Failed to load package" }, 500);

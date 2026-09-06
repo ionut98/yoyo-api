@@ -82,6 +82,7 @@ function createItem(
     reviewCount: profile.reviewCount,
     website: profile.website,
     mapsUrl: null,
+    availableWindows: [],
   };
 }
 

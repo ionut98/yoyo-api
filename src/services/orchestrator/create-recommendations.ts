@@ -16,6 +16,7 @@ import {
 } from "../booking/package-requests.js";
 import type { PackageRecommendationDto } from "../../schemas/orchestrator.js";
 import { buildPackageCandidates } from "./build-packages.js";
+import { applyAvailableWindowsAndStagger, attachAvailableWindows } from "./available-windows.js";
 import { budgetCapFromParty, calculateScore } from "./score-packages.js";
 import { resolveTargetDate, resolveTargetSlotForDate } from "./resolve-target-date.js";
 
@@ -92,14 +93,20 @@ export async function createRecommendationsForParty(
   // Party already has an active booking — don't regenerate competing variants.
   const committed = await listCommittedPackagesForParty(supabase, partyId);
   if (committed.length > 0) {
-    return committed.slice(0, 1);
+    return committed.slice(0, 1).map((pkg) => ({
+      ...pkg,
+      items: pkg.items.map((item) => ({ ...item, availableWindows: item.availableWindows ?? [] })),
+    }));
   }
 
   // Surface expired/failed near-bookings until parent regenerates or dismisses.
   if (!options.regenerate) {
     const terminal = await listTerminalPackagesForParty(supabase, partyId);
     if (terminal.length > 0) {
-      return terminal.slice(0, 1);
+      return terminal.slice(0, 1).map((pkg) => ({
+        ...pkg,
+        items: pkg.items.map((item) => ({ ...item, availableWindows: item.availableWindows ?? [] })),
+      }));
     }
   }
 
@@ -124,6 +131,7 @@ export async function createRecommendationsForParty(
     startsAt,
     endsAt,
   })
+    .map((pkg) => applyAvailableWindowsAndStagger(pkg, availability))
     .filter((pkg) => pkg.estimatedPrice.min <= budgetCap)
     .map((pkg) => {
       const { score, breakdown, reasons } = calculateScore(party, pkg, profilesById);
@@ -137,7 +145,7 @@ export async function createRecommendationsForParty(
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 
-  return insertPackages(
+  const inserted = await insertPackages(
     supabase,
     candidates.map((pkg) => ({
       partyId: pkg.partyId,
@@ -160,8 +168,10 @@ export async function createRecommendationsForParty(
         endsAt: item.endsAt,
         priceEstimate: item.priceEstimate,
         bookingMode: item.bookingMode,
-        itemStatus: "proposed",
+        itemStatus: "proposed" as const,
       })),
     })),
   );
+
+  return inserted.map((pkg) => attachAvailableWindows(pkg, availability));
 }

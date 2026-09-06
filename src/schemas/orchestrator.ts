@@ -52,6 +52,14 @@ export const packageItemSchema = z.object({
   reviewCount: z.number().nullable().default(null),
   website: z.string().nullable().default(null),
   mapsUrl: z.string().nullable().default(null),
+  availableWindows: z
+    .array(
+      z.object({
+        startsAt: z.string(),
+        endsAt: z.string(),
+      }),
+    )
+    .default([]),
 });
 
 export const packageRecommendationSchema = z.object({

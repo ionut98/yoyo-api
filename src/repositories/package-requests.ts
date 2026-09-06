@@ -117,6 +117,7 @@ function mapPackageRow(row: any): PackageRecommendationDto {
         reviewCount: providerCard.reviewCount,
         website: providerCard.website,
         mapsUrl: providerCard.mapsUrl,
+        availableWindows: [],
       };
     }),
   };
