@@ -139,6 +139,7 @@ export const providerProfileSchema = z.object({
   serviceAreaSectors: z.array(z.string()),
   priceMin: z.number().int().nonnegative(),
   priceMax: z.number().int().nonnegative(),
+  defaultBookingDurationMinutes: z.number().int().min(30).max(480).default(120),
   photos: z
     .array(
       z.object({
@@ -248,6 +249,7 @@ export const updateProviderProfileBodySchema = z.object({
   serviceAreaSectors: z.array(z.string()).default([]),
   priceMin: z.number().int().nonnegative(),
   priceMax: z.number().int().nonnegative(),
+  defaultBookingDurationMinutes: z.number().int().min(30).max(480).default(120),
   providerName: z.string().min(2).max(120).optional(),
   description: z.string().max(4000).nullable().optional(),
   address: z.string().max(300).nullable().optional(),

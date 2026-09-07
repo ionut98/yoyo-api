@@ -133,6 +133,7 @@ export async function createManualProvider(
     serviceAreaSectors: profile.serviceAreaSectors,
     priceMin: profile.priceMin,
     priceMax: profile.priceMax,
+    defaultBookingDurationMinutes: profile.defaultBookingDurationMinutes,
     photos: [],
   };
 }

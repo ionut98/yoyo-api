@@ -123,6 +123,9 @@ export async function createRecommendationsForParty(
 
   const budgetCap = budgetCapFromParty(party);
   const profilesById = new Map(profiles.map((profile) => [profile.providerId, profile]));
+  const durationByProviderId = new Map(
+    profiles.map((profile) => [profile.providerId, profile.defaultBookingDurationMinutes]),
+  );
   const candidates = buildPackageCandidates({
     party,
     providers: profiles,
@@ -131,7 +134,7 @@ export async function createRecommendationsForParty(
     startsAt,
     endsAt,
   })
-    .map((pkg) => applyAvailableWindowsAndStagger(pkg, availability))
+    .map((pkg) => applyAvailableWindowsAndStagger(pkg, availability, durationByProviderId))
     .filter((pkg) => pkg.estimatedPrice.min <= budgetCap)
     .map((pkg) => {
       const { score, breakdown, reasons } = calculateScore(party, pkg, profilesById);
@@ -173,5 +176,5 @@ export async function createRecommendationsForParty(
     })),
   );
 
-  return inserted.map((pkg) => attachAvailableWindows(pkg, availability));
+  return inserted.map((pkg) => attachAvailableWindows(pkg, availability, durationByProviderId));
 }

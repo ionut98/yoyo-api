@@ -99,6 +99,7 @@ async function toProfileDto(
     serviceAreaSectors: profile.serviceAreaSectors,
     priceMin: profile.priceMin,
     priceMax: profile.priceMax,
+    defaultBookingDurationMinutes: profile.defaultBookingDurationMinutes,
     photos,
   });
 }

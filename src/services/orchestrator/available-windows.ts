@@ -1,7 +1,3 @@
-import {
-  bucharestDateTimeIso,
-  DEFAULT_AVAILABILITY_WINDOWS,
-} from "../../lib/time-intervals.js";
 import type { EffectiveAvailabilityRow } from "../../repositories/provider-enrichment.js";
 import type { PackageRecommendationDto } from "../../schemas/orchestrator.js";
 import { availableOnInterval } from "./build-packages.js";
@@ -10,79 +6,121 @@ export type AvailableWindow = { startsAt: string; endsAt: string };
 
 type PackageRole = PackageRecommendationDto["items"][number]["role"];
 
-/** Preference order of default 2h windows per role (party-day logic). */
-const ROLE_WINDOW_PREFERENCES: Record<
-  PackageRole,
-  ReadonlyArray<{ startHour: number; endHour: number }>
-> = {
-  space: [
-    { startHour: 16, endHour: 18 },
-    { startHour: 14, endHour: 16 },
-    { startHour: 18, endHour: 20 },
-    { startHour: 12, endHour: 14 },
-    { startHour: 10, endHour: 12 },
-  ],
-  entertainment: [
-    { startHour: 16, endHour: 18 },
-    { startHour: 14, endHour: 16 },
-    { startHour: 18, endHour: 20 },
-    { startHour: 12, endHour: 14 },
-    { startHour: 10, endHour: 12 },
-  ],
-  balloons: [
-    { startHour: 14, endHour: 16 },
-    { startHour: 12, endHour: 14 },
-    { startHour: 10, endHour: 12 },
-    { startHour: 16, endHour: 18 },
-    { startHour: 18, endHour: 20 },
-  ],
-  cakes: [
-    { startHour: 16, endHour: 18 },
-    { startHour: 14, endHour: 16 },
-    { startHour: 18, endHour: 20 },
-    { startHour: 12, endHour: 14 },
-    { startHour: 10, endHour: 12 },
-  ],
+const DEFAULT_DURATION_MINUTES = 120;
+const MAX_CHIPS_PER_PROVIDER = 10;
+
+/** Preferred start hours (Bucharest) for staggered defaults by role. */
+const ROLE_PREFERRED_START_HOURS: Record<PackageRole, number[]> = {
+  space: [16, 14, 18, 12, 10],
+  entertainment: [16, 14, 18, 12, 10],
+  balloons: [14, 12, 10, 16, 18],
+  cakes: [16, 14, 18, 12, 10],
 };
 
 function windowKey(startsAt: string, endsAt: string): string {
   return `${Date.parse(startsAt)}|${Date.parse(endsAt)}`;
 }
 
+function bucharestHour(iso: string): number {
+  return Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Bucharest",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date(iso)),
+  );
+}
+
+function durationForProvider(
+  providerId: string,
+  durationByProviderId?: Map<string, number> | Record<string, number>,
+): number {
+  if (!durationByProviderId) return DEFAULT_DURATION_MINUTES;
+  const value =
+    durationByProviderId instanceof Map
+      ? durationByProviderId.get(providerId)
+      : durationByProviderId[providerId];
+  if (!value || !Number.isFinite(value)) return DEFAULT_DURATION_MINUTES;
+  return Math.max(30, Math.min(480, Math.round(value)));
+}
+
+/**
+ * Carve bookable slots of `durationMinutes` from real free availability rows.
+ * Step is min(30, duration) so parents see overlapping options inside long free blocks.
+ */
+export function listBookableWindows(
+  availability: EffectiveAvailabilityRow[],
+  providerId: string,
+  date: string,
+  durationMinutes: number,
+): AvailableWindow[] {
+  const durationMs = durationMinutes * 60 * 1000;
+  const stepMs = Math.min(30, durationMinutes) * 60 * 1000;
+  const freeRows = availability
+    .filter(
+      (row) =>
+        row.providerId === providerId &&
+        row.status === "available" &&
+        row.date === date,
+    )
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+
+  const seen = new Set<string>();
+  const windows: AvailableWindow[] = [];
+
+  for (const row of freeRows) {
+    let cursor = Date.parse(row.startsAt);
+    const rowEnd = Date.parse(row.endsAt);
+    while (cursor + durationMs <= rowEnd + 1) {
+      const startsAt = new Date(cursor).toISOString();
+      const endsAt = new Date(cursor + durationMs).toISOString();
+      const key = windowKey(startsAt, endsAt);
+      if (!seen.has(key) && availableOnInterval(availability, providerId, startsAt, endsAt)) {
+        seen.add(key);
+        windows.push({ startsAt, endsAt });
+      }
+      cursor += stepMs;
+      if (windows.length >= MAX_CHIPS_PER_PROVIDER) break;
+    }
+    if (windows.length >= MAX_CHIPS_PER_PROVIDER) break;
+  }
+
+  return windows;
+}
+
+/** @deprecated use listBookableWindows — kept name for call sites during transition */
 export function listCoveredDefaultWindows(
   availability: EffectiveAvailabilityRow[],
   providerId: string,
   date: string,
+  durationMinutes = DEFAULT_DURATION_MINUTES,
 ): AvailableWindow[] {
-  const windows: AvailableWindow[] = [];
-  for (const slot of DEFAULT_AVAILABILITY_WINDOWS) {
-    const startsAt = bucharestDateTimeIso(date, slot.startHour, 0);
-    const endsAt = bucharestDateTimeIso(date, slot.endHour, 0);
-    if (availableOnInterval(availability, providerId, startsAt, endsAt)) {
-      windows.push({ startsAt, endsAt });
-    }
-  }
-  return windows;
+  return listBookableWindows(availability, providerId, date, durationMinutes);
 }
 
 export function pickPreferredWindow(
   role: PackageRole,
-  date: string,
   windows: AvailableWindow[],
   fallback: AvailableWindow,
 ): AvailableWindow {
   if (windows.length === 0) return fallback;
 
-  const byKey = new Map(windows.map((window) => [windowKey(window.startsAt, window.endsAt), window]));
+  const byHour = new Map<number, AvailableWindow[]>();
+  for (const window of windows) {
+    const hour = bucharestHour(window.startsAt);
+    const list = byHour.get(hour) ?? [];
+    list.push(window);
+    byHour.set(hour, list);
+  }
 
-  for (const pref of ROLE_WINDOW_PREFERENCES[role]) {
-    const startsAt = bucharestDateTimeIso(date, pref.startHour, 0);
-    const endsAt = bucharestDateTimeIso(date, pref.endHour, 0);
-    const match = byKey.get(windowKey(startsAt, endsAt));
+  for (const hour of ROLE_PREFERRED_START_HOURS[role]) {
+    const match = byHour.get(hour)?.[0];
     if (match) return match;
   }
 
-  const exact = byKey.get(windowKey(fallback.startsAt, fallback.endsAt));
+  const exact = windows.find(
+    (window) => windowKey(window.startsAt, window.endsAt) === windowKey(fallback.startsAt, fallback.endsAt),
+  );
   return exact ?? windows[0] ?? fallback;
 }
 
@@ -99,16 +137,24 @@ export function applyAvailableWindowsAndStagger<
       availableWindows?: AvailableWindow[];
     }>;
   },
->(pkg: T, availability: EffectiveAvailabilityRow[]): T {
+>(
+  pkg: T,
+  availability: EffectiveAvailabilityRow[],
+  durationByProviderId?: Map<string, number> | Record<string, number>,
+): T {
   const date = pkg.targetDate.slice(0, 10);
   const items = pkg.items.map((item) => {
-    const availableWindows = listCoveredDefaultWindows(availability, item.providerId, date);
-    const preferred = pickPreferredWindow(
-      item.role,
+    const durationMinutes = durationForProvider(item.providerId, durationByProviderId);
+    const availableWindows = listBookableWindows(
+      availability,
+      item.providerId,
       date,
-      availableWindows,
-      { startsAt: item.startsAt, endsAt: item.endsAt },
+      durationMinutes,
     );
+    const preferred = pickPreferredWindow(item.role, availableWindows, {
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+    });
     return {
       ...item,
       availableWindows,
@@ -137,13 +183,22 @@ export function attachAvailableWindows<
       availableWindows?: AvailableWindow[];
     }>;
   },
->(pkg: T, availability: EffectiveAvailabilityRow[]): T {
+>(
+  pkg: T,
+  availability: EffectiveAvailabilityRow[],
+  durationByProviderId?: Map<string, number> | Record<string, number>,
+): T {
   const date = pkg.targetDate.slice(0, 10);
   return {
     ...pkg,
     items: pkg.items.map((item) => ({
       ...item,
-      availableWindows: listCoveredDefaultWindows(availability, item.providerId, date),
+      availableWindows: listBookableWindows(
+        availability,
+        item.providerId,
+        date,
+        durationForProvider(item.providerId, durationByProviderId),
+      ),
     })),
   };
 }

@@ -82,11 +82,22 @@ export function createPackageRequestRoutes(env: Env) {
         });
       }
 
+      const providerIds = [...new Set(pkg.items.map((item) => item.providerId))];
       const availability = await listEffectiveAvailability(supabase, {
-        providerIds: [...new Set(pkg.items.map((item) => item.providerId))],
+        providerIds,
         date: pkg.targetDate.slice(0, 10),
       });
-      return c.json(attachAvailableWindows(pkg, availability));
+      const { data: durationRows } = await supabase
+        .from("provider_service_profiles")
+        .select("provider_id, default_booking_duration_minutes")
+        .in("provider_id", providerIds);
+      const durationByProviderId = new Map<string, number>(
+        (durationRows ?? []).map((row) => [
+          row.provider_id as string,
+          Number(row.default_booking_duration_minutes ?? 120) || 120,
+        ]),
+      );
+      return c.json(attachAvailableWindows(pkg, availability, durationByProviderId));
     } catch (error) {
       console.error(error);
       return c.json({ error: "Failed to load package" }, 500);

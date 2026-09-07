@@ -29,6 +29,7 @@ export type ProviderProfileRow = {
   serviceAreaSectors: string[];
   priceMin: number;
   priceMax: number;
+  defaultBookingDurationMinutes: number;
 };
 
 export type EffectiveAvailabilityRow = {
@@ -102,6 +103,10 @@ function mapProfileRow(row: any, cityFallback: string | null = null): ProviderPr
     serviceAreaSectors: (row.service_area_sectors as string[] | null) ?? [],
     priceMin: Number(row.price_min),
     priceMax: Number(row.price_max),
+    defaultBookingDurationMinutes: Math.max(
+      30,
+      Math.min(480, Number(row.default_booking_duration_minutes ?? 120) || 120),
+    ),
   };
 }
 
@@ -136,6 +141,7 @@ export async function listProviderProfilesForCity(
       service_area_sectors,
       price_min,
       price_max,
+      default_booking_duration_minutes,
       provider:providers!inner(
         id,
         place_id,
@@ -397,6 +403,7 @@ export async function getProviderProfileForMember(
       service_area_sectors,
       price_min,
       price_max,
+      default_booking_duration_minutes,
       provider:providers!inner(
         id, place_id, name, description, address, phone, website, lat, lng, categories, home_sector,
         rating, review_count, recommendation_score
@@ -434,6 +441,7 @@ export async function updateProviderProfile(
     serviceAreaSectors: string[];
     priceMin: number;
     priceMax: number;
+    defaultBookingDurationMinutes: number;
     providerName?: string;
     description?: string | null;
     address?: string | null;
@@ -455,6 +463,7 @@ export async function updateProviderProfile(
       service_area_sectors: input.serviceAreaSectors,
       price_min: input.priceMin,
       price_max: input.priceMax,
+      default_booking_duration_minutes: input.defaultBookingDurationMinutes,
       source_type: "manual",
       updated_at: new Date().toISOString(),
     })

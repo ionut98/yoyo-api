@@ -62,6 +62,7 @@ function baseProfile(overrides: Partial<ProviderProfileRow>): ProviderProfileRow
     serviceAreaSectors: ["s3"],
     priceMin: 1500,
     priceMax: 2200,
+    defaultBookingDurationMinutes: 120,
     ...overrides,
   };
 }
