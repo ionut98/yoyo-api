@@ -140,6 +140,7 @@ async function attachPartyContext(
   type PartyContext = {
     parentName: string | null;
     parentEmail: string | null;
+    parentPhone: string | null;
     sector: string | null;
     ageRange: string | null;
     budget: string | null;
@@ -158,6 +159,7 @@ async function attachPartyContext(
     byPackageId.set(row.package_id as string, {
       parentName: (row.parent_name as string | null) ?? null,
       parentEmail: (row.parent_email as string | null) ?? null,
+      parentPhone: (row.parent_phone as string | null) ?? null,
       sector: (row.sector as string | null) ?? null,
       ageRange: (row.age_range as string | null) ?? null,
       budget: (row.budget as string | null) ?? null,
@@ -182,6 +184,7 @@ async function attachPartyContext(
       party: {
         parentName: context.parentName,
         parentEmail: context.parentEmail,
+        parentPhone: context.parentPhone,
         sector: context.sector,
         ageRange: context.ageRange,
         budget: context.budget,

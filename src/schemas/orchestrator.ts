@@ -81,6 +81,7 @@ export const packageRecommendationSchema = z.object({
     .object({
       parentName: z.string().nullable(),
       parentEmail: z.string().nullable(),
+      parentPhone: z.string().nullable().optional().default(null),
       sector: z.string().nullable(),
       ageRange: z.string().nullable(),
       budget: z.string().nullable(),
