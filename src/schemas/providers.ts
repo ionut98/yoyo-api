@@ -43,6 +43,7 @@ export const providerSchema = z.object({
   categories: z.array(providerCategorySchema),
   address: z.string().nullable(),
   phone: z.string().nullable(),
+  whatsappOptIn: z.boolean().default(false),
   website: z.string().nullable(),
   rating: z.number().nullable(),
   reviewCount: z.number().nullable(),

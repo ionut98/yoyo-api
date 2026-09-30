@@ -26,6 +26,7 @@ type DbProviderRow = {
   categories: string[];
   address: string | null;
   phone: string | null;
+  whatsapp_opt_in?: boolean | null;
   website: string | null;
   rating: number | null;
   review_count: number | null;
@@ -79,6 +80,7 @@ export function toProviderDto(row: DbProviderRow): ProviderDto {
     categories: toCategories(row.categories),
     address: row.address,
     phone: row.phone,
+    whatsappOptIn: Boolean(row.whatsapp_opt_in),
     website: row.website,
     rating: row.rating,
     reviewCount: row.review_count,

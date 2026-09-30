@@ -43,6 +43,7 @@ function baseProfile(overrides: Partial<ProviderProfileRow>): ProviderProfileRow
     description: null,
     address: null,
     phone: null,
+    whatsappOptIn: false,
     website: null,
     lat: null,
     lng: null,

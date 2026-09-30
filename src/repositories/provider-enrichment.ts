@@ -10,6 +10,7 @@ export type ProviderProfileRow = {
   description: string | null;
   address: string | null;
   phone: string | null;
+  whatsappOptIn: boolean;
   website: string | null;
   lat: number | null;
   lng: number | null;
@@ -71,6 +72,7 @@ function mapProfileRow(row: any, cityFallback: string | null = null): ProviderPr
     description: (provider.description as string | null | undefined) ?? null,
     address: (provider.address as string | null | undefined) ?? null,
     phone: (provider.phone as string | null | undefined) ?? null,
+    whatsappOptIn: Boolean(provider.whatsapp_opt_in),
     website: (provider.website as string | null | undefined) ?? null,
     lat:
       provider.lat === null || provider.lat === undefined ? null : Number(provider.lat),
@@ -149,6 +151,7 @@ export async function listProviderProfilesForCity(
         description,
         address,
         phone,
+        whatsapp_opt_in,
         website,
         lat,
         lng,
@@ -405,7 +408,7 @@ export async function getProviderProfileForMember(
       price_max,
       default_booking_duration_minutes,
       provider:providers!inner(
-        id, place_id, name, description, address, phone, website, lat, lng, categories, home_sector,
+        id, place_id, name, description, address, phone, whatsapp_opt_in, website, lat, lng, categories, home_sector,
         rating, review_count, recommendation_score
       )
     `,
@@ -446,6 +449,7 @@ export async function updateProviderProfile(
     description?: string | null;
     address?: string | null;
     phone?: string | null;
+    whatsappOptIn?: boolean;
     website?: string | null;
     lat?: number | null;
     lng?: number | null;
@@ -478,6 +482,7 @@ export async function updateProviderProfile(
   if (input.description !== undefined) identityPatch.description = input.description;
   if (input.address !== undefined) identityPatch.address = input.address;
   if (input.phone !== undefined) identityPatch.phone = input.phone;
+  if (input.whatsappOptIn !== undefined) identityPatch.whatsapp_opt_in = input.whatsappOptIn;
   if (input.website !== undefined) identityPatch.website = input.website;
   if (input.lat !== undefined) identityPatch.lat = input.lat;
   if (input.lng !== undefined) identityPatch.lng = input.lng;
