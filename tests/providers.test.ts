@@ -53,6 +53,7 @@ describe("toProviderDto", () => {
       categories: ["venue", "entertainment"],
       address: "Str. Test 1",
       phone: "+40123456789",
+      whatsapp_opt_in: true,
       website: "https://example.com",
       rating: 4.5,
       review_count: 120,
@@ -69,9 +70,11 @@ describe("toProviderDto", () => {
       id: "550e8400-e29b-41d4-a716-446655440000",
       placeId: "places/abc123",
       name: "Petreceri Kids",
+      description: null,
       categories: ["venue", "entertainment"],
       address: "Str. Test 1",
       phone: "+40123456789",
+      whatsappOptIn: true,
       website: "https://example.com",
       rating: 4.5,
       reviewCount: 120,
@@ -81,6 +84,28 @@ describe("toProviderDto", () => {
       city: { id: "660e8400-e29b-41d4-a716-446655440001", name: "București" },
       photoUrl: "https://cdn.example/photo.jpg",
     });
+  });
+
+  it("defaults whatsappOptIn to false when column missing", () => {
+    const dto = toProviderDto({
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      place_id: "places/abc123",
+      name: "Test",
+      categories: ["venue"],
+      address: null,
+      phone: "+40712345678",
+      website: null,
+      rating: null,
+      review_count: null,
+      lat: null,
+      lng: null,
+      maps_url: null,
+      city: null,
+      provider_photos: [],
+    });
+
+    expect(dto.phone).toBe("+40712345678");
+    expect(dto.whatsappOptIn).toBe(false);
   });
 
   it("filters unknown categories", () => {

@@ -83,6 +83,7 @@ async function toProfileDto(
     description: profile.description,
     address: profile.address,
     phone: profile.phone,
+    whatsappOptIn: profile.whatsappOptIn,
     website: profile.website,
     lat: profile.lat,
     lng: profile.lng,
