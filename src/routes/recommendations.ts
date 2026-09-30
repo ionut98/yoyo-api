@@ -44,6 +44,7 @@ export function createRecommendationRoutes(env: Env) {
       const data = await createRecommendationsForParty(supabase, parsed.data, user.id, {
         regenerate: body.regenerate,
         targetDate: body.targetDate,
+        env,
       });
       return c.json({ data });
     } catch (error) {

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Env } from "../../config/env.js";
 import {
   deleteProposedPackagesForParty,
   getPackageById,
@@ -10,6 +11,7 @@ import { expireStaleSlotHolds, insertSlotHolds, releaseSlotHoldsForPackage } fro
 import { listEffectiveAvailabilityRange } from "../../repositories/provider-enrichment.js";
 import { formatBucharestDate } from "../../lib/time-intervals.js";
 import { availableOnInterval } from "../orchestrator/build-packages.js";
+import { mergeAvailabilityWithGoogleBusy } from "../google-calendar.js";
 import type { PackageRecommendationDto } from "../../schemas/orchestrator.js";
 
 export type PackageItemTimeInput = {
@@ -130,6 +132,7 @@ async function markItemBookedOnCalendar(
 async function assertProvidersStillAvailable(
   supabase: SupabaseClient,
   items: Array<{ providerId: string; startsAt: string; endsAt: string }>,
+  env?: Env,
 ): Promise<void> {
   if (items.length === 0) return;
 
@@ -139,11 +142,19 @@ async function assertProvidersStillAvailable(
   const endIso = new Date(Math.max(...ends)).toISOString();
   const providerIds = [...new Set(items.map((item) => item.providerId))];
 
-  const availability = await listEffectiveAvailabilityRange(supabase, {
+  let availability = await listEffectiveAvailabilityRange(supabase, {
     providerIds,
     startIso,
     endIso,
   });
+  if (env) {
+    availability = await mergeAvailabilityWithGoogleBusy(
+      env,
+      supabase,
+      { providerIds, startIso, endIso },
+      availability,
+    );
+  }
 
   for (const item of items) {
     if (!availableOnInterval(availability, item.providerId, item.startsAt, item.endsAt)) {
@@ -257,7 +268,7 @@ async function applyProposedItemTimes(
 export async function requestPackageBooking(
   supabase: SupabaseClient,
   packageId: string,
-  options: { itemTimes?: PackageItemTimeInput[] } = {},
+  options: { itemTimes?: PackageItemTimeInput[]; env?: Env } = {},
 ) {
   await expireStaleSlotHolds(supabase);
   let pkg = await getPackageById(supabase, packageId);
@@ -287,6 +298,7 @@ export async function requestPackageBooking(
         startsAt: item.startsAt,
         endsAt: item.endsAt,
       })),
+      options.env,
     );
   }
 
