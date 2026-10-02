@@ -10,6 +10,7 @@ import { getPackageById } from "../repositories/package-requests.js";
 import { listEffectiveAvailability } from "../repositories/provider-enrichment.js";
 import { attachAvailableWindows } from "../services/orchestrator/available-windows.js";
 import { cancelPackageBooking, requestPackageBooking } from "../services/booking/package-requests.js";
+import { mergeAvailabilityWithGoogleBusy } from "../services/google-calendar.js";
 
 const requestPackageBodySchema = z
   .object({
@@ -48,6 +49,7 @@ export function createPackageRequestRoutes(env: Env) {
       const supabase = getSupabaseForRequest(c, env);
       const pkg = await requestPackageBooking(supabase, parsed.data, {
         itemTimes: body.itemTimes,
+        env,
       });
       return c.json(pkg);
     } catch (error) {
@@ -83,10 +85,20 @@ export function createPackageRequestRoutes(env: Env) {
       }
 
       const providerIds = [...new Set(pkg.items.map((item) => item.providerId))];
-      const availability = await listEffectiveAvailability(supabase, {
+      let availability = await listEffectiveAvailability(supabase, {
         providerIds,
         date: pkg.targetDate.slice(0, 10),
       });
+      availability = await mergeAvailabilityWithGoogleBusy(
+        env,
+        supabase,
+        {
+          providerIds,
+          startIso: pkg.targetStartsAt,
+          endIso: pkg.targetEndsAt,
+        },
+        availability,
+      );
       const { data: durationRows } = await supabase
         .from("provider_service_profiles")
         .select("provider_id, default_booking_duration_minutes")

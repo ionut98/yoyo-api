@@ -59,15 +59,28 @@ curl -H "Authorization: Bearer <access_token>" \
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_PUBLISHABLE_KEY` | Yes* | Supabase publishable key (public reads via RLS) |
 | `SUPABASE_ANON_KEY` | Yes* | Legacy alias for publishable key |
+| `SUPABASE_SERVICE_ROLE_KEY` | For admin claim approve/cleanup | Service role key (server-only) |
+| `GOOGLE_CALENDAR_CLIENT_ID` | Optional | Google OAuth client id (FreeBusy) |
+| `GOOGLE_CALENDAR_CLIENT_SECRET` | Optional | Google OAuth client secret |
+| `GOOGLE_CALENDAR_REDIRECT_URI` | Optional | Must match Google Cloud + SPA callback route |
+| `TOKEN_ENCRYPTION_KEY` | With Google | Min 16 chars; encrypts refresh tokens + signs OAuth state |
 | `PORT` | No | Server port (default 3001) |
-| `CORS_ORIGIN` | No | Allowed CORS origin(s), comma-separated (default `http://localhost:8080,https://yoyoparty.lovable.app`) |
+| `CORS_ORIGIN` | No | Allowed CORS origin(s), comma-separated |
 
 \* One of `SUPABASE_PUBLISHABLE_KEY` or `SUPABASE_ANON_KEY` is required.
 
+## SQL migrations
+
+Apply from `scripts/sql/` on Supabase (already applied on yoyo-parties when using agent MCP):
+
+- `add_whatsapp_opt_in.sql`
+- `claim_and_google_calendar.sql` — admin-gated claims + Google Calendar connections
+
 ## Prerequisites
 
-1. Apply Supabase migrations in `yoyo-scraper/supabase/migrations/` (including `002_rls_and_profiles.sql`)
+1. Apply Supabase SQL in `scripts/sql/` (and any historical scraper migrations)
 2. Populate data via scraper: `cd yoyo-scraper && npm run scrape -- --city București --sync`
+3. Promote at least one admin: `insert into account_roles ... role = 'admin'`
 
 ## Scripts
 

@@ -7,6 +7,7 @@ import { loadEnv } from "./config/env.js";
 import { healthRoutes } from "./routes/health.js";
 import { createPackageRequestRoutes } from "./routes/package-requests.js";
 import { createPartyRoutes } from "./routes/parties.js";
+import { createAdminRoutes } from "./routes/admin.js";
 import { createProviderConsoleRoutes } from "./routes/provider-console.js";
 import { createProviderRoutes } from "./routes/providers.js";
 import { createRecommendationRoutes } from "./routes/recommendations.js";
@@ -30,6 +31,7 @@ app.route("/api/parties", createPartyRoutes(env));
 app.route("/api/parties", createRecommendationRoutes(env));
 app.route("/api/packages", createPackageRequestRoutes(env));
 app.route("/api/provider", createProviderConsoleRoutes(env));
+app.route("/api/admin", createAdminRoutes(env));
 
 serve(
   {

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Env } from "../../config/env.js";
 import { getPartyById } from "../../repositories/parties.js";
 import {
   listEffectiveAvailability,
@@ -14,6 +15,7 @@ import {
   cancelTerminalPackagesForParty,
   expireStalePackageRequests,
 } from "../booking/package-requests.js";
+import { mergeAvailabilityWithGoogleBusy } from "../google-calendar.js";
 import type { PackageRecommendationDto } from "../../schemas/orchestrator.js";
 import { buildPackageCandidates } from "./build-packages.js";
 import { applyAvailableWindowsAndStagger, attachAvailableWindows } from "./available-windows.js";
@@ -31,7 +33,7 @@ export async function createRecommendationsForParty(
   supabase: SupabaseClient,
   partyId: string,
   userId: string,
-  options: { regenerate?: boolean; targetDate?: string } = {},
+  options: { regenerate?: boolean; targetDate?: string; env?: Env } = {},
 ): Promise<PackageRecommendationDto[]> {
   let party = await getPartyById(supabase, userId, partyId);
   if (!party) {
@@ -116,10 +118,19 @@ export async function createRecommendationsForParty(
   const date = resolveTargetDate(party);
   const { startsAt, endsAt } = resolveTargetSlotForDate(date);
   const profiles = await listProviderProfilesForCity(supabase, party.city);
-  const availability = await listEffectiveAvailability(supabase, {
-    providerIds: profiles.map((profile) => profile.providerId),
+  const providerIds = profiles.map((profile) => profile.providerId);
+  let availability = await listEffectiveAvailability(supabase, {
+    providerIds,
     date,
   });
+  if (options.env) {
+    availability = await mergeAvailabilityWithGoogleBusy(
+      options.env,
+      supabase,
+      { providerIds, startIso: startsAt, endIso: endsAt },
+      availability,
+    );
+  }
 
   const budgetCap = budgetCapFromParty(party);
   const profilesById = new Map(profiles.map((profile) => [profile.providerId, profile]));

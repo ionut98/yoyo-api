@@ -6,10 +6,7 @@ import {
   getSupabaseForRequest,
   type AuthVariables,
 } from "../middleware/auth.js";
-import {
-  claimProviderMembership,
-  getProviderMemberships,
-} from "../repositories/accounts.js";
+import { getAccountRole, getProviderMemberships } from "../repositories/accounts.js";
 import { createManualProvider } from "../repositories/create-provider.js";
 import { listProviderPackages } from "../repositories/package-requests.js";
 import {
@@ -27,10 +24,23 @@ import {
   updateProviderProfile,
 } from "../repositories/provider-enrichment.js";
 import {
+  createClaimRequest,
+  listClaimCandidates,
+  listMyClaimRequests,
+} from "../repositories/claim-requests.js";
+import {
   expireStalePackageRequests,
   providerDismissExpiredItem,
   providerRespondToItem,
 } from "../services/booking/package-requests.js";
+import {
+  buildGoogleConnectUrl,
+  completeGoogleCalendarCallback,
+  disconnectGoogleCalendar,
+  getGoogleCalendarStatus,
+  mergeAvailabilityWithGoogleBusy,
+  setGoogleCalendarIds,
+} from "../services/google-calendar.js";
 import { buildDefaultAvailableSlots } from "../lib/time-intervals.js";
 import {
   deleteProviderPhoto,
@@ -114,11 +124,35 @@ export function createProviderConsoleRoutes(env: Env) {
       const user = c.get("user");
       if (!user) return c.json({ error: "Unauthorized" }, 401);
       const supabase = getSupabaseForRequest(c, env);
-      const memberships = await getProviderMemberships(supabase, user.id);
-      return c.json({ data: memberships });
+      const [memberships, accountRole] = await Promise.all([
+        getProviderMemberships(supabase, user.id),
+        getAccountRole(supabase, user.id),
+      ]);
+      return c.json({ data: memberships, accountRole });
     } catch (error) {
       console.error(error);
       return c.json({ error: "Failed to load provider memberships" }, 500);
+    }
+  });
+
+  routes.get("/account", async (c) => {
+    try {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+      const supabase = getSupabaseForRequest(c, env);
+      const [memberships, accountRole] = await Promise.all([
+        getProviderMemberships(supabase, user.id),
+        getAccountRole(supabase, user.id),
+      ]);
+      return c.json({
+        userId: user.id,
+        email: user.email ?? null,
+        accountRole,
+        memberships,
+      });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: "Failed to load account" }, 500);
     }
   });
 
@@ -148,32 +182,200 @@ export function createProviderConsoleRoutes(env: Env) {
   });
 
   routes.post("/claim", async (c) => {
+    return c.json(
+      {
+        error: "Open claim is disabled. Submit a claim request for admin approval.",
+        code: "CLAIM_REQUIRES_APPROVAL",
+      },
+      410,
+    );
+  });
+
+  routes.get("/claim-candidates", async (c) => {
+    const q = c.req.query("q") ?? undefined;
+    const city = c.req.query("city") ?? undefined;
+    try {
+      const supabase = getSupabaseForRequest(c, env);
+      const data = await listClaimCandidates(supabase, { q, city });
+      return c.json({ data });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: "Failed to list claim candidates" }, 500);
+    }
+  });
+
+  routes.post("/claim-requests", async (c) => {
     const json = await c.req.json().catch(() => null);
     const parsed = z
       .object({
         providerId: z.string().uuid(),
+        message: z.string().max(2000).nullable().optional(),
+        contactPhone: z.string().max(40).nullable().optional(),
+        contactEmail: z.union([z.string().email(), z.literal(""), z.null()]).optional(),
+        proofUrl: z.string().url().max(500).nullable().optional(),
       })
       .safeParse(json);
     if (!parsed.success) {
-      return c.json({ error: "Invalid claim payload" }, 400);
+      return c.json({ error: "Invalid claim request payload", details: z.treeifyError(parsed.error) }, 400);
     }
 
     try {
       const user = c.get("user");
       if (!user) return c.json({ error: "Unauthorized" }, 401);
       const supabase = getSupabaseForRequest(c, env);
-      const membership = await claimProviderMembership(
-        supabase,
-        user.id,
-        parsed.data.providerId,
-      );
-      return c.json({ data: membership });
+      const data = await createClaimRequest(supabase, {
+        providerId: parsed.data.providerId,
+        requesterUserId: user.id,
+        message: parsed.data.message,
+        contactPhone: parsed.data.contactPhone,
+        contactEmail: parsed.data.contactEmail || null,
+        proofUrl: parsed.data.proofUrl,
+      });
+      return c.json({ data }, 201);
     } catch (error) {
       console.error(error);
       return c.json(
-        { error: error instanceof Error ? error.message : "Failed to claim provider" },
-        500,
+        { error: error instanceof Error ? error.message : "Failed to create claim request" },
+        400,
       );
+    }
+  });
+
+  routes.get("/claim-requests/mine", async (c) => {
+    try {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+      const supabase = getSupabaseForRequest(c, env);
+      const data = await listMyClaimRequests(supabase, user.id);
+      return c.json({ data });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: "Failed to list claim requests" }, 500);
+    }
+  });
+
+  routes.get("/google-calendar/connect-url", async (c) => {
+    const providerId = z.string().uuid().safeParse(c.req.query("providerId"));
+    if (!providerId.success) return c.json({ error: "Invalid providerId" }, 400);
+    const returnTo = c.req.query("returnTo") ?? null;
+
+    try {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+      await requireProviderMembership(env, c as any, providerId.data);
+      const url = buildGoogleConnectUrl(env, {
+        providerId: providerId.data,
+        userId: user.id,
+        returnTo,
+      });
+      return c.json({ url });
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Failed to build Google connect URL";
+      return c.json({ error: message }, message.includes("not configured") ? 503 : 403);
+    }
+  });
+
+  routes.post("/google-calendar/callback", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = z
+      .object({
+        providerId: z.string().uuid(),
+        code: z.string().min(1),
+        state: z.string().min(1),
+      })
+      .safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid Google callback payload" }, 400);
+    }
+
+    try {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+      const supabase = await requireProviderMembership(env, c as any, parsed.data.providerId);
+      const result = await completeGoogleCalendarCallback(env, supabase, {
+        providerId: parsed.data.providerId,
+        userId: user.id,
+        code: parsed.data.code,
+        state: parsed.data.state,
+      });
+      return c.json({
+        ok: true,
+        connection: {
+          providerId: result.connection.providerId,
+          googleAccountEmail: result.connection.googleAccountEmail,
+          calendarIds: result.connection.calendarIds,
+          connectedAt: result.connection.connectedAt,
+        },
+        calendars: result.calendars,
+        returnTo: result.returnTo,
+      });
+    } catch (error) {
+      console.error(error);
+      return c.json(
+        { error: error instanceof Error ? error.message : "Failed to complete Google OAuth" },
+        400,
+      );
+    }
+  });
+
+  routes.get("/google-calendar/status/:providerId", async (c) => {
+    const providerId = z.string().uuid().safeParse(c.req.param("providerId"));
+    if (!providerId.success) return c.json({ error: "Invalid provider id" }, 400);
+    try {
+      const supabase = await requireProviderMembership(env, c as any, providerId.data);
+      const status = await getGoogleCalendarStatus(env, supabase, providerId.data);
+      return c.json(status);
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: "Failed to load Google Calendar status" }, 403);
+    }
+  });
+
+  routes.put("/google-calendar/calendars", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = z
+      .object({
+        providerId: z.string().uuid(),
+        calendarIds: z.array(z.string().min(1)).min(1).max(20),
+      })
+      .safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid calendars payload" }, 400);
+    }
+    try {
+      const supabase = await requireProviderMembership(env, c as any, parsed.data.providerId);
+      const connection = await setGoogleCalendarIds(
+        supabase,
+        parsed.data.providerId,
+        parsed.data.calendarIds,
+      );
+      return c.json({
+        ok: true,
+        connection: {
+          providerId: connection.providerId,
+          googleAccountEmail: connection.googleAccountEmail,
+          calendarIds: connection.calendarIds,
+          connectedAt: connection.connectedAt,
+        },
+      });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: "Failed to update Google calendars" }, 403);
+    }
+  });
+
+  routes.post("/google-calendar/disconnect", async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = z.object({ providerId: z.string().uuid() }).safeParse(json);
+    if (!parsed.success) return c.json({ error: "Invalid disconnect payload" }, 400);
+    try {
+      const supabase = await requireProviderMembership(env, c as any, parsed.data.providerId);
+      await disconnectGoogleCalendar(supabase, parsed.data.providerId);
+      return c.json({ ok: true });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: "Failed to disconnect Google Calendar" }, 403);
     }
   });
 
@@ -368,11 +570,17 @@ export function createProviderConsoleRoutes(env: Env) {
         endIso = new Date(Date.UTC(year, monthNumber, 1)).toISOString();
       }
 
-      const rows = await listEffectiveAvailabilityRange(supabase, {
+      const baseRows = await listEffectiveAvailabilityRange(supabase, {
         providerIds: [providerId],
         startIso,
         endIso,
       });
+      const rows = await mergeAvailabilityWithGoogleBusy(
+        env,
+        supabase,
+        { providerIds: [providerId], startIso, endIso },
+        baseRows,
+      );
 
       const packageIds = [
         ...new Set(rows.map((row) => row.packageId).filter((id): id is string => Boolean(id))),

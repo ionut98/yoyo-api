@@ -40,7 +40,7 @@ export type EffectiveAvailabilityRow = {
   startsAt: string;
   endsAt: string;
   status: "available" | "booked";
-  source?: "availability" | "booking" | "hold" | "manual";
+  source?: "availability" | "booking" | "hold" | "manual" | "google";
   packageId?: string | null;
   packageItemId?: string | null;
   reservationId?: string | null;
@@ -351,9 +351,10 @@ function intervalKey(providerId: string, startsAt: string, endsAt: string): stri
 }
 
 function eventRank(row: EffectiveAvailabilityRow): number {
-  // Prefer real booking/hold/manual rows over availability mirrors.
+  // Prefer real booking/hold/manual/google rows over availability mirrors.
   if (row.source === "booking") return 300;
   if (row.source === "manual") return 250;
+  if (row.source === "google") return 240;
   if (row.source === "hold") return 200;
   if (row.status === "booked") return 100;
   return 0;
@@ -380,7 +381,10 @@ function dedupeAvailabilityEvents(rows: EffectiveAvailabilityRow[]): EffectiveAv
       (other) =>
         other !== row &&
         other.providerId === row.providerId &&
-        (other.source === "booking" || other.source === "hold" || other.source === "manual") &&
+        (other.source === "booking" ||
+          other.source === "hold" ||
+          other.source === "manual" ||
+          other.source === "google") &&
         intervalsOverlap(row.startsAt, row.endsAt, other.startsAt, other.endsAt),
     );
     return !coveredByBooking;
