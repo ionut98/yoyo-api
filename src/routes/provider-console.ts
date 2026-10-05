@@ -194,10 +194,26 @@ export function createProviderConsoleRoutes(env: Env) {
   routes.get("/claim-candidates", async (c) => {
     const q = c.req.query("q") ?? undefined;
     const city = c.req.query("city") ?? undefined;
+    const pageRaw = c.req.query("page");
+    const limitRaw = c.req.query("limit");
+    const page = pageRaw ? Number(pageRaw) : undefined;
+    const limit = limitRaw ? Number(limitRaw) : undefined;
+    if (
+      (pageRaw !== undefined && (!Number.isFinite(page) || (page as number) < 1)) ||
+      (limitRaw !== undefined && (!Number.isFinite(limit) || (limit as number) < 1))
+    ) {
+      return c.json({ error: "Invalid page or limit" }, 400);
+    }
+
     try {
       const supabase = getSupabaseForRequest(c, env);
-      const data = await listClaimCandidates(supabase, { q, city });
-      return c.json({ data });
+      const result = await listClaimCandidates(supabase, {
+        q,
+        city,
+        page,
+        limit,
+      });
+      return c.json(result);
     } catch (error) {
       console.error(error);
       return c.json({ error: "Failed to list claim candidates" }, 500);

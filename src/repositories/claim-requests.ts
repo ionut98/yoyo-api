@@ -53,20 +53,56 @@ const CLAIM_SELECT = `
   provider:providers(name)
 `;
 
+export type ClaimCandidateDto = {
+  id: string;
+  name: string;
+  address: string | null;
+  city: string | null;
+  categories: string[];
+  phone: string | null;
+  photoUrl: string | null;
+};
+
+export type ClaimCandidatesPage = {
+  data: ClaimCandidateDto[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+};
+
+type ClaimCandidatePhoto = {
+  public_url: string | null;
+  sort_order?: number | null;
+  is_cover?: boolean | null;
+};
+
+function firstPhotoUrl(photos: ClaimCandidatePhoto[] | null | undefined): string | null {
+  const ordered = [...(photos ?? [])].sort((a, b) => {
+    const coverDelta = Number(Boolean(b.is_cover)) - Number(Boolean(a.is_cover));
+    if (coverDelta !== 0) return coverDelta;
+    return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+  });
+  const cover = ordered.find((photo) => photo.is_cover && photo.public_url) ?? ordered[0];
+  return cover?.public_url ?? null;
+}
+
+function emptyClaimCandidatesPage(page: number, limit: number): ClaimCandidatesPage {
+  return {
+    data: [],
+    pagination: { page, limit, total: 0, totalPages: 0 },
+  };
+}
+
 export async function listClaimCandidates(
   supabase: SupabaseClient,
-  options: { q?: string; city?: string; limit?: number },
-): Promise<
-  Array<{
-    id: string;
-    name: string;
-    address: string | null;
-    city: string | null;
-    categories: string[];
-    phone: string | null;
-  }>
-> {
-  const limit = Math.min(50, Math.max(1, options.limit ?? 20));
+  options: { q?: string; city?: string; page?: number; limit?: number },
+): Promise<ClaimCandidatesPage> {
+  const page = Math.max(1, Math.floor(options.page ?? 1));
+  const limit = Math.min(50, Math.max(1, Math.floor(options.limit ?? 12)));
+  const offset = (page - 1) * limit;
 
   let cityId: string | null = null;
   if (options.city) {
@@ -76,30 +112,45 @@ export async function listClaimCandidates(
       .eq("name", options.city)
       .maybeSingle();
     if (cityError) throw new Error(`Failed to resolve city: ${cityError.message}`);
-    if (!cityRow?.id) return [];
+    if (!cityRow?.id) return emptyClaimCandidatesPage(page, limit);
     cityId = cityRow.id as string;
   }
 
   const { data: owned, error: ownedError } = await supabase.rpc("provider_ids_with_owner");
   if (ownedError) throw new Error(`Failed to load owned providers: ${ownedError.message}`);
-  const ownedIds = new Set(((owned as string[] | null) ?? []).map((id) => id));
+  const ownedIds = ((owned as string[] | null) ?? []).filter(Boolean);
 
   let query = supabase
     .from("providers")
-    .select("id, name, address, phone, categories, city:cities(name)")
+    .select(
+      `
+      id,
+      name,
+      address,
+      phone,
+      categories,
+      city:cities(name),
+      provider_photos(public_url, sort_order, is_cover)
+    `,
+      { count: "exact" },
+    )
     .order("name", { ascending: true })
-    .limit(200);
+    .range(offset, offset + limit - 1);
 
   if (cityId) query = query.eq("city_id", cityId);
   if (options.q?.trim()) query = query.ilike("name", `%${options.q.trim()}%`);
+  if (ownedIds.length > 0) {
+    query = query.not("id", "in", `(${ownedIds.join(",")})`);
+  }
 
-  const { data, error } = await query;
+  const { data, error, count } = await query;
   if (error) throw new Error(`Failed to list claim candidates: ${error.message}`);
 
-  return (data ?? [])
-    .filter((row) => !ownedIds.has(row.id as string))
-    .slice(0, limit)
-    .map((row) => {
+  const total = count ?? 0;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+
+  return {
+    data: (data ?? []).map((row) => {
       const city = row.city as { name?: string } | Array<{ name?: string }> | null;
       return {
         id: row.id as string,
@@ -108,8 +159,11 @@ export async function listClaimCandidates(
         phone: (row.phone as string | null) ?? null,
         categories: (row.categories as string[] | null) ?? [],
         city: Array.isArray(city) ? (city[0]?.name ?? null) : (city?.name ?? null),
+        photoUrl: firstPhotoUrl(row.provider_photos as ClaimCandidatePhoto[] | null),
       };
-    });
+    }),
+    pagination: { page, limit, total, totalPages },
+  };
 }
 
 export async function createClaimRequest(
