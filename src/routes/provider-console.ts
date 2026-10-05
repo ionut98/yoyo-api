@@ -128,7 +128,12 @@ export function createProviderConsoleRoutes(env: Env) {
         getProviderMemberships(supabase, user.id),
         getAccountRole(supabase, user.id),
       ]);
-      return c.json({ data: memberships, accountRole });
+      return c.json({
+        data: memberships,
+        accountRole,
+        userId: user.id,
+        email: user.email ?? null,
+      });
     } catch (error) {
       console.error(error);
       return c.json({ error: "Failed to load provider memberships" }, 500);
@@ -145,10 +150,12 @@ export function createProviderConsoleRoutes(env: Env) {
         getAccountRole(supabase, user.id),
       ]);
       return c.json({
-        userId: user.id,
-        email: user.email ?? null,
-        accountRole,
-        memberships,
+        data: {
+          userId: user.id,
+          email: user.email ?? null,
+          accountRole,
+          memberships,
+        },
       });
     } catch (error) {
       console.error(error);
