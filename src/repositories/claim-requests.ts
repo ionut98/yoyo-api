@@ -6,7 +6,8 @@ export type ClaimRequestRow = {
   id: string;
   providerId: string;
   providerName: string | null;
-  requesterUserId: string;
+  /** Requester auth user id — events UI Zod schema expects `userId`. */
+  userId: string;
   status: ClaimRequestStatus;
   message: string | null;
   contactPhone: string | null;
@@ -19,7 +20,8 @@ export type ClaimRequestRow = {
   updatedAt: string;
 };
 
-function mapClaimRequest(row: Record<string, unknown>): ClaimRequestRow {
+/** Exported for unit tests — keeps API JSON aligned with yoyo-events claim schema. */
+export function mapClaimRequest(row: Record<string, unknown>): ClaimRequestRow {
   const provider = row.provider as
     | { name?: string | null }
     | Array<{ name?: string | null }>
@@ -33,7 +35,7 @@ function mapClaimRequest(row: Record<string, unknown>): ClaimRequestRow {
     id: row.id as string,
     providerId: row.provider_id as string,
     providerName,
-    requesterUserId: row.requester_user_id as string,
+    userId: row.requester_user_id as string,
     status: row.status as ClaimRequestStatus,
     message: (row.message as string | null) ?? null,
     contactPhone: (row.contact_phone as string | null) ?? null,
@@ -259,7 +261,7 @@ export async function approveClaimRequest(
 
   const { error: membershipError } = await serviceSupabase.from("provider_memberships").upsert(
     {
-      user_id: request.requesterUserId,
+      user_id: request.userId,
       provider_id: request.providerId,
       role: "owner",
       updated_at: now,
@@ -273,14 +275,14 @@ export async function approveClaimRequest(
   const { data: existingRole, error: roleLookupError } = await serviceSupabase
     .from("account_roles")
     .select("role")
-    .eq("user_id", request.requesterUserId)
+    .eq("user_id", request.userId)
     .maybeSingle();
   if (roleLookupError) {
     throw new Error(`Failed to load account role: ${roleLookupError.message}`);
   }
   if (!existingRole) {
     const { error: roleError } = await serviceSupabase.from("account_roles").insert({
-      user_id: request.requesterUserId,
+      user_id: request.userId,
       role: "provider",
       updated_at: now,
     });
